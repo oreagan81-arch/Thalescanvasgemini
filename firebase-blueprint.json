@@ -1,0 +1,134 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "User profile allowed to use the system",
+      "type": "object",
+      "properties": {
+        "email": { "type": "string" },
+        "name": { "type": "string" },
+        "role": { "type": "string", "enum": ["admin"] },
+        "createdAt": { "type": "number" },
+        "lastLogin": { "type": "number" }
+      },
+      "required": ["email", "role"]
+    },
+    "Week": {
+      "title": "Week metadata",
+      "description": "Metadata for a specific week",
+      "type": "object",
+      "properties": {
+        "weekId": { "type": "string" },
+        "startDate": { "type": "number" },
+        "endDate": { "type": "number" },
+        "label": { "type": "string" },
+        "isDeployed": { "type": "boolean" },
+        "createdAt": { "type": "number" },
+        "updatedAt": { "type": "number" }
+      },
+      "required": ["weekId", "startDate", "endDate", "isDeployed"]
+    },
+    "PlannerRow": {
+      "title": "Planner Row",
+      "description": "A specific lesson plan block",
+      "type": "object",
+      "properties": {
+        "weekId": { "type": "string" },
+        "day": { "type": "string", "enum": ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"] },
+        "subject": { "type": "string" },
+        "lessonNum": { "type": "string" },
+        "lessonTitle": { "type": "string" },
+        "type": { "type": "string", "enum": ["Lesson", "Test", "Quiz", "Project", "Review"] },
+        "resources": { "type": "array", "items": { "type": "string" } },
+        "homework": { "type": "string" },
+        "reminder": { "type": "string" },
+        "notes": { "type": "string" },
+        "deployStatus": { "type": "string", "enum": ["Draft", "Ready", "Deployed", "Failed"] },
+        "createdAt": { "type": "number" },
+        "updatedAt": { "type": "number" }
+      },
+      "required": ["weekId", "day", "subject", "deployStatus"]
+    },
+    "ResourceFile": {
+      "title": "Resource File",
+      "description": "Information mapped from Canvas files",
+      "type": "object",
+      "properties": {
+        "fileId": { "type": "string" },
+        "rawName": { "type": "string" },
+        "cleanName": { "type": "string" },
+        "subject": { "type": "string" },
+        "type": { "type": "string" },
+        "canvasUrl": { "type": "string" },
+        "createdAt": { "type": "number" }
+      },
+      "required": ["fileId", "rawName", "cleanName", "canvasUrl"]
+    },
+    "Announcement": {
+      "title": "Announcement",
+      "description": "Parent-facing announcement text",
+      "type": "object",
+      "properties": {
+        "weekId": { "type": "string" },
+        "content": { "type": "string" },
+        "status": { "type": "string", "enum": ["Draft", "Posted"] },
+        "createdAt": { "type": "number" },
+        "updatedAt": { "type": "number" }
+      },
+      "required": ["weekId", "content", "status"]
+    },
+    "Deployment": {
+      "title": "Deployment Log",
+      "description": "History of system deployments",
+      "type": "object",
+      "properties": {
+        "weekId": { "type": "string" },
+        "status": { "type": "string", "enum": ["Success", "Pending", "Failed"] },
+        "logs": { "type": "array", "items": { "type": "string" } },
+        "timestamp": { "type": "number" }
+      },
+      "required": ["weekId", "status", "timestamp"]
+    },
+    "Setting": {
+      "title": "Setting",
+      "description": "System-wide configs",
+      "type": "object",
+      "properties": {
+        "key": { "type": "string" },
+        "value": { "type": "string" },
+        "updatedAt": { "type": "number" }
+      },
+      "required": ["key", "value"]
+    }
+  },
+  "firestore": {
+    "users": {
+      "schema": "User",
+      "description": "System users. Only Owen Reagan should be provisioned."
+    },
+    "weeks": {
+      "schema": "Week",
+      "description": "Weekly data"
+    },
+    "planner_rows": {
+      "schema": "PlannerRow",
+      "description": "Individual cards inside columns of weeks"
+    },
+    "resources": {
+      "schema": "ResourceFile",
+      "description": "Registry of known Canvas files mapped"
+    },
+    "announcements": {
+      "schema": "Announcement",
+      "description": "Weekly generated announcements"
+    },
+    "deployments": {
+      "schema": "Deployment",
+      "description": "Deployment history"
+    },
+    "settings": {
+      "schema": "Setting",
+      "description": "System-wide config"
+    }
+  }
+}

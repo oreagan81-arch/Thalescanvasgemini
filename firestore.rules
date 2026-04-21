@@ -1,0 +1,61 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // 0. Global Safety Net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Primitive Definitions
+    function incoming() { return request.resource.data; }
+    function existing() { return resource.data; }
+    function isSignedIn() { return request.auth != null; }
+    function isVerifiedUser() { 
+      // strict lock to the specific authorized emails and require verified email
+      return isSignedIn() 
+             && (
+               request.auth.token.email == "owen.reagan@thalesacademy.org" ||
+               request.auth.token.email == "oreagan81@gmail.com"
+             )
+             && request.auth.token.email_verified == true; 
+    }
+    
+    // Strict schema implementations for standard security
+
+    match /users/{userId} {
+      allow read: if isVerifiedUser() && request.auth.uid == userId;
+      allow write: if isVerifiedUser() && request.auth.uid == userId;
+    }
+
+    match /weeks/{weekId} {
+      allow read: if isVerifiedUser();
+      allow write: if isVerifiedUser();
+    }
+
+    match /planner_rows/{rowId} {
+      allow read: if isVerifiedUser();
+      allow write: if isVerifiedUser();
+    }
+
+    match /resources/{resourceId} {
+      allow read: if isVerifiedUser();
+      allow write: if isVerifiedUser();
+    }
+
+    match /announcements/{annId} {
+      allow read: if isVerifiedUser();
+      allow write: if isVerifiedUser();
+    }
+
+    match /deployments/{depId} {
+      allow read: if isVerifiedUser();
+      allow write: if isVerifiedUser();
+    }
+
+    match /settings/{settingId} {
+      allow read: if isVerifiedUser();
+      allow write: if isVerifiedUser();
+    }
+  }
+}
