@@ -2,60 +2,114 @@ rules_version = '2';
 
 service cloud.firestore {
   match /databases/{database}/documents {
-    // 0. Global Safety Net
+    
+    // =========================================================
+    // 0. GLOBAL SAFETY NET
+    // =========================================================
     match /{document=**} {
       allow read, write: if false;
     }
 
-    // Primitive Definitions
+    // =========================================================
+    // 1. GLOBAL HELPERS
+    // =========================================================
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isEmailVerified() {
+      return request.auth.token.email_verified == true;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isAdmin() {
+      return isSignedIn() && (
+        request.auth.token.email == "OReagan81@gmail.com" || 
+        request.auth.token.email == "owen.reagan@thalesacademy.org"
+      );
+    }
+
     function incoming() { return request.resource.data; }
     function existing() { return resource.data; }
-    function isSignedIn() { return request.auth != null; }
-    function isVerifiedUser() { 
-      // strict lock to the specific authorized emails and require verified email
-      return isSignedIn() 
-             && (
-               request.auth.token.email == "owen.reagan@thalesacademy.org" ||
-               request.auth.token.email == "oreagan81@gmail.com"
-             )
-             && request.auth.token.email_verified == true; 
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
     }
+
+    // =========================================================
+    // 2. VALIDATION BLUEPRINTS
+    // =========================================================
     
-    // Strict schema implementations for standard security
-
-    match /users/{userId} {
-      allow read: if isVerifiedUser() && request.auth.uid == userId;
-      allow write: if isVerifiedUser() && request.auth.uid == userId;
+    function isValidSetting(data) {
+      return data.keys().hasAll(['updatedAt']) &&
+             (data.get('teacherName', '') is string) &&
+             (data.get('signature', '') is string) &&
+             (data.get('tone', '') is string);
     }
 
+    function isValidPlannerRow(data) {
+      return data.weekId is string && 
+             data.day in ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'] &&
+             data.deployStatus in ['Draft', 'Ready', 'Deployed', 'Failed'];
+    }
+
+    // =========================================================
+    // 3. COLLECTION MATCH BLOCKS
+    // =========================================================
+
+    // SETTINGS: Pinned to User Identity
+    match /settings/{userId} {
+      allow read: if isOwner(userId) || isAdmin();
+      allow create, update: if (isOwner(userId) || isAdmin()) && isValidSetting(incoming());
+    }
+
+    // WEEKS: Shared Academic Context
     match /weeks/{weekId} {
-      allow read: if isVerifiedUser();
-      allow write: if isVerifiedUser();
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
     }
 
+    // PLANNER ROWS: The Curriculum Engine
     match /planner_rows/{rowId} {
-      allow read: if isVerifiedUser();
-      allow write: if isVerifiedUser();
+      allow read: if isSignedIn();
+      allow create, update: if isAdmin() && isValidPlannerRow(incoming()) && isValidId(rowId);
+      allow delete: if isAdmin();
     }
 
-    match /resources/{resourceId} {
-      allow read: if isVerifiedUser();
-      allow write: if isVerifiedUser();
-    }
-
+    // ANNOUNCEMENTS: Communication Logic
     match /announcements/{annId} {
-      allow read: if isVerifiedUser();
-      allow write: if isVerifiedUser();
+      allow read: if isSignedIn();
+      allow create, update: if isAdmin() && incoming().content.size() < 50000;
+      allow delete: if isAdmin();
     }
 
-    match /deployments/{depId} {
-      allow read: if isVerifiedUser();
-      allow write: if isVerifiedUser();
+    // CANVAS PAGES: Staging Layer
+    match /canvas_pages/{pageId} {
+      allow read: if isSignedIn();
+      allow create, update: if isAdmin() && incoming().status in ['Draft', 'Deployed'];
+      allow delete: if isAdmin();
     }
 
-    match /settings/{settingId} {
-      allow read: if isVerifiedUser();
-      allow write: if isVerifiedUser();
+    // RESOURCES: Registry
+    match /resources/{resId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+    // DEPLOY LOGS: Audit Trail
+    match /deployments/{logId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn(); // Allow logging actions
+      allow update, delete: if isAdmin();
+    }
+
+    // USERS: Admin Controlled
+    match /users/{userId} {
+      allow read: if isOwner(userId) || isAdmin();
+      allow write: if isAdmin();
     }
   }
 }

@@ -46,7 +46,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     await signOut(auth);
   };
 
-  const isAllowedUser = !!user && !!user.email && ALLOWED_EMAILS.includes(user.email.toLowerCase()) && user.emailVerified;
+  const isAllowedUser = !!user && !!user.email && ALLOWED_EMAILS.includes(user.email.toLowerCase());
 
   return (
     <AuthContext.Provider value={{ user, loading, signIn, logOut, isAllowedUser }}>

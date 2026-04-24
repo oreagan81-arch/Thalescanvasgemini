@@ -91,44 +91,55 @@
     },
     "Setting": {
       "title": "Setting",
-      "description": "System-wide configs",
+      "description": "User specific configurations",
       "type": "object",
       "properties": {
-        "key": { "type": "string" },
-        "value": { "type": "string" },
-        "updatedAt": { "type": "number" }
+        "teacherName": { "type": "string" },
+        "schoolName": { "type": "string" },
+        "signature": { "type": "string" },
+        "tone": { "type": "string" },
+        "canvasDomain": { "type": "string" },
+        "canvasToken": { "type": "string" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      }
+    },
+    "CanvasPage": {
+      "title": "Canvas Page",
+      "description": "Staged HTML content for Canvas",
+      "type": "object",
+      "properties": {
+        "weekId": { "type": "string" },
+        "htmlContent": { "type": "string" },
+        "status": { "type": "string", "enum": ["Draft", "Deployed"] },
+        "canvasPageId": { "type": "string" },
+        "updatedAt": { "type": "string", "format": "date-time" }
       },
-      "required": ["key", "value"]
+      "required": ["weekId", "htmlContent", "status"]
+    },
+    "Assignment": {
+      "title": "Assignment",
+      "description": "Canvas LMS assignments",
+      "type": "object",
+      "properties": {
+        "weekId": { "type": "string" },
+        "title": { "type": "string" },
+        "points": { "type": "number" },
+        "dueDate": { "type": "string", "format": "date-time" },
+        "status": { "type": "string", "enum": ["Scheduled", "Deployed"] },
+        "canvasId": { "type": "string" }
+      },
+      "required": ["weekId", "title", "status"]
     }
   },
   "firestore": {
-    "users": {
-      "schema": "User",
-      "description": "System users. Only Owen Reagan should be provisioned."
-    },
-    "weeks": {
-      "schema": "Week",
-      "description": "Weekly data"
-    },
-    "planner_rows": {
-      "schema": "PlannerRow",
-      "description": "Individual cards inside columns of weeks"
-    },
-    "resources": {
-      "schema": "ResourceFile",
-      "description": "Registry of known Canvas files mapped"
-    },
-    "announcements": {
-      "schema": "Announcement",
-      "description": "Weekly generated announcements"
-    },
-    "deployments": {
-      "schema": "Deployment",
-      "description": "Deployment history"
-    },
-    "settings": {
-      "schema": "Setting",
-      "description": "System-wide config"
-    }
+    "users": { "schema": "User", "description": "System users." },
+    "weeks": { "schema": "Week", "description": "Weekly academic nodes." },
+    "planner_rows": { "schema": "PlannerRow", "description": "Curriculum nodes." },
+    "resources": { "schema": "ResourceFile", "description": "LMS file registry." },
+    "announcements": { "schema": "Announcement", "description": "Parent communication drafts." },
+    "deployments": { "schema": "Deployment", "description": "Audit trail." },
+    "settings": { "schema": "Setting", "description": "User preference profile." },
+    "canvas_pages": { "schema": "CanvasPage", "description": "HTML staging area." },
+    "assignments": { "schema": "Assignment", "description": "LMS assignment registry." }
   }
 }
