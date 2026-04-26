@@ -30,6 +30,7 @@ export interface Assignment {
   dueDate: any;
   status: 'Pending' | 'Drafted' | 'Deployed';
   canvasId?: string;
+  canvasUrl?: string; // Track Canvas link
   isGraded?: boolean;
   confidence?: number;
   createdAt?: any;
@@ -215,6 +216,38 @@ export const assignmentService = {
       });
     } catch (error) {
       handleFirestoreError(error, OperationType.UPDATE, `${COLLECTION_NAME}/${id}`);
+    }
+  },
+
+  shiftAssignments: async (weekId: string, fromDate: Date, days: number = 1) => {
+    const userId = auth.currentUser?.uid;
+    if (!userId) throw new Error("Authentication required");
+
+    try {
+      const q = query(
+        collection(db, COLLECTION_NAME), 
+        where('userId', '==', userId),
+        where('weekId', '==', weekId)
+      );
+      const snap = await getDocs(q);
+      const assignments = snap.docs.map(d => ({ id: d.id, ...d.data() } as Assignment));
+      
+      const batch = writeBatch(db);
+      assignments.forEach(a => {
+        const dueDate = a.dueDate?.toDate ? a.dueDate.toDate() : new Date(a.dueDate);
+        if (dueDate >= fromDate) {
+          // Add days, skip weekends logic could go here
+          const newDate = new Date(dueDate);
+          newDate.setDate(newDate.getDate() + days);
+          batch.update(doc(db, COLLECTION_NAME, a.id!), {
+            dueDate: newDate,
+            updatedAt: serverTimestamp()
+          });
+        }
+      });
+      await batch.commit();
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, COLLECTION_NAME);
     }
   }
 };

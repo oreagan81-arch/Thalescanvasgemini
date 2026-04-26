@@ -6,20 +6,23 @@ import {
   CheckCircle2, 
   History, 
   Wand2, 
-  Calendar,
+  Calendar as CalendarIcon,
   AlertCircle
 } from 'lucide-react';
-import { Button } from '@/components/ui/button';
-import { Textarea } from '@/components/ui/textarea';
-import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
-import { Checkbox } from '@/components/ui/checkbox';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Button } from '../../components/ui/button';
+import { Textarea } from '../../components/ui/textarea';
+import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '../../components/ui/card';
+import { Badge } from '../../components/ui/badge';
+import { Checkbox } from '../../components/ui/checkbox';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '../../components/ui/tabs';
+import { Popover, PopoverContent, PopoverTrigger } from '../../components/ui/popover';
+import { Calendar as UICalendar } from '../../components/ui/calendar';
+import { Calendar } from 'lucide-react';
 
-import { aiAnnouncementService, GeneratedAnnouncement } from '@/src/services/aiAnnouncementService';
-import { canvasApiService } from '@/src/services/canvasApiService';
-import { useStore } from '@/src/store';
-import { rulesEngine } from '@/src/lib/thales/rulesEngine';
+import { aiAnnouncementService, GeneratedAnnouncement } from '../services/aiAnnouncementService';
+import { canvasApiService } from '../services/canvasApiService';
+import { useStore } from '../store';
+import { rulesEngine } from '../lib/thales/rulesEngine';
 import { toast } from 'sonner';
 
 const SUGGESTIONS = [
@@ -31,13 +34,14 @@ const SUGGESTIONS = [
 
 export default function AnnouncementCommandCenter() {
   const { geminiApiKey, canvasApiToken, canvasCourseIds, addRecentCommand } = useStore();
-  const canvasCourseId = canvasCourseIds['Homeroom'];
   const [command, setCommand] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
   const [isPosting, setIsPosting] = useState(false);
   const [result, setResult] = useState<GeneratedAnnouncement | null>(null);
   const [validationErrors, setValidationErrors] = useState<string[]>([]);
   const [showApiKeyError, setShowApiKeyError] = useState(false);
+  const [selectedCourses, setSelectedCourses] = useState<string[]>(['Homeroom']);
+  const [scheduledDate, setScheduledDate] = useState<Date | null>(null);
 
   const handleGenerate = async () => {
     if (!command.trim()) return;
@@ -62,6 +66,11 @@ export default function AnnouncementCommandCenter() {
       if (resp) {
         // 1. Sanitize for Canvas (Strip styles, add headers)
         resp.bodyHTML = rulesEngine.sanitizeForCanvas(resp.bodyHTML, resp.title);
+        
+        // Update suggested date from AI if available
+        if (resp.suggestedPostDate) {
+          setScheduledDate(new Date(resp.suggestedPostDate));
+        }
 
         // 2. Perform Curriculum Verification (Detect halluncinations)
         const lowerCmd = command.toLowerCase();
@@ -94,22 +103,34 @@ export default function AnnouncementCommandCenter() {
   };
 
   const handlePostToCanvas = async () => {
-    if (!result || !canvasCourseId || !canvasApiToken) {
-      toast.error("Canvas settings are missing or announcement not generated.");
+    if (!result || selectedCourses.length === 0 || !canvasApiToken) {
+      toast.error("Please select at least one course and ensure announcement is generated.");
       return;
     }
 
     setIsPosting(true);
+    let successCount = 0;
+    
     try {
-      await canvasApiService.postAnnouncement(
-        result.title,
-        result.bodyHTML,
-        canvasCourseId
-      );
-      toast.success("Announcement successfully posted to Canvas!");
+      for (const subject of selectedCourses) {
+        const courseId = canvasCourseIds[subject];
+        if (!courseId) continue;
+
+        await canvasApiService.postAnnouncement(
+          result.title,
+          result.bodyHTML,
+          courseId,
+          { 
+            delayed_post_at: scheduledDate ? scheduledDate.toISOString() : undefined 
+          }
+        );
+        successCount++;
+      }
+      
+      toast.success(`Broadcasting Complete: Posted to ${successCount} courses.`);
     } catch (error: any) {
       console.error("Canvas Post Error:", error);
-      toast.error(error.message || "Failed to post to Canvas.");
+      toast.error(error.message || "Failed to post to one or more courses.");
     } finally {
       setIsPosting(false);
     }
@@ -246,13 +267,67 @@ export default function AnnouncementCommandCenter() {
                 
                 <CardContent className="p-0 flex-grow flex flex-col">
                   <Tabs defaultValue="preview" className="flex-grow flex flex-col">
-                    <div className="px-6 py-2 border-b border-zinc-100 dark:border-zinc-800 bg-zinc-50/50 dark:bg-zinc-900/50">
+                    <div className="px-6 py-2 border-b border-zinc-100 dark:border-zinc-800 bg-zinc-50/50 dark:bg-zinc-900/50 flex items-center justify-between">
                       <TabsList>
                         <TabsTrigger value="preview">Email Preview</TabsTrigger>
                         <TabsTrigger value="checklist" className="flex items-center gap-2">
                           Attachments <Badge variant="secondary" className="ml-1 h-5 w-5 p-0 flex items-center justify-center rounded-full">{result.requiredAttachments.length}</Badge>
                         </TabsTrigger>
                       </TabsList>
+
+                      <div className="flex items-center gap-2">
+                        <Popover>
+                          <PopoverTrigger asChild>
+                            <Button variant="ghost" size="sm" className="h-8 text-[10px] font-bold uppercase gap-2">
+                              {scheduledDate ? (
+                                <>
+                                  <CalendarIcon className="w-3.5 h-3.5 text-blue-500" />
+                                  Ready to Post: {scheduledDate.toLocaleDateString()}
+                                </>
+                              ) : (
+                                <>
+                                  <CalendarIcon className="w-3.5 h-3.5" />
+                                  Post Immediately
+                                </>
+                              )}
+                            </Button>
+                          </PopoverTrigger>
+                          <PopoverContent className="w-auto p-0 bg-white dark:bg-zinc-950 border-zinc-200 dark:border-zinc-800">
+                             <UICalendar
+                              mode="single"
+                              selected={scheduledDate || undefined}
+                              onSelect={(date) => setScheduledDate(date || null)}
+                              initialFocus
+                            />
+                          </PopoverContent>
+                        </Popover>
+
+                        <Popover>
+                          <PopoverTrigger asChild>
+                            <Button variant="ghost" size="sm" className="h-8 text-[10px] font-bold uppercase gap-2">
+                              Target: {selectedCourses.length} Courses
+                            </Button>
+                          </PopoverTrigger>
+                          <PopoverContent className="w-56 p-3 bg-white dark:bg-zinc-950 border-zinc-200 dark:border-zinc-800">
+                            <h4 className="text-[10px] uppercase font-bold text-zinc-500 mb-3 tracking-widest">Multi-Cast Selection</h4>
+                            <div className="space-y-2">
+                               {Object.keys(canvasCourseIds).map(subject => (
+                                 <div key={subject} className="flex items-center gap-2">
+                                   <Checkbox 
+                                    id={`course-${subject}`} 
+                                    checked={selectedCourses.includes(subject)}
+                                    onCheckedChange={(checked) => {
+                                      if (checked) setSelectedCourses([...selectedCourses, subject]);
+                                      else setSelectedCourses(selectedCourses.filter(s => s !== subject));
+                                    }}
+                                   />
+                                   <label htmlFor={`course-${subject}`} className="text-xs font-medium cursor-pointer">{subject}</label>
+                                 </div>
+                               ))}
+                            </div>
+                          </PopoverContent>
+                        </Popover>
+                      </div>
                     </div>
                     
                     <TabsContent value="preview" className="flex-grow p-6 m-0 outline-none">

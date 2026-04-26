@@ -86,6 +86,19 @@ export const rulesEngine = {
   },
 
   /**
+   * Upgrade: Regex Clickable Downloads
+   * Detects raw HTTP strings and wraps them in Canvas native preview styling.
+   */
+  clickableDownloads: (html: string): string => {
+    if (!html) return html;
+    // Regex for URLs not already inside an href or src
+    const urlRegex = /(?<!href="|src=")(https?:\/\/[^\s<]+)/gi;
+    return html.replace(urlRegex, (url) => {
+      return `<a class="instructure_file_link inline_disabled" href="${url}" target="_blank" title="Download Resource">${url}</a>`;
+    });
+  },
+
+  /**
    * Fix 5: Brevity Mandate Enforcement (Silent Auditor)
    */
   silentAuditor: (content: string): string => {

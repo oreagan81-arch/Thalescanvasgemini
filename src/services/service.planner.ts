@@ -31,6 +31,8 @@ export interface PlannerRow {
   reminder: string;
   notes: string;
   deployStatus: 'Draft' | 'Ready' | 'Deployed' | 'Failed';
+  canvasId?: string; // Track Canvas page/assignment ID
+  canvasUrl?: string; // Track Canvas direct link
   lastModified?: any;
   createdAt?: any;
   updatedAt?: any;

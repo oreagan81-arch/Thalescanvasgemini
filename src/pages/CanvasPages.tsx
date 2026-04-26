@@ -17,7 +17,8 @@ import {
 } from 'lucide-react'
 import { canvasPageService, CanvasPage } from '../services/service.canvasPage'
 import { plannerService } from '../services/service.planner'
-import { assignmentService } from '../services/service.assignment'
+import { assignmentService, Assignment } from '../services/service.assignment'
+import { canvasSyncService } from '../services/service.canvasSync'
 import { calendarService } from '../services/service.calendar'
 import { useStore } from '../store'
 import { generateWeeklyAgenda } from '../lib/geminiHelper'
@@ -102,12 +103,22 @@ export function CanvasPages() {
     if (!page) return;
     try {
       setLoading(true);
-      // Simulation of Canvas API call
-      await new Promise(r => setTimeout(r, 2000));
-      await canvasPageService.updateStatus(page.id!, 'Deployed', 'canvas_page_12345');
-      toast.success('Deployed to Canvas LMS successfully');
+      
+      // Fetch assignments for this week to perform two-pass sync
+      const assignments: Assignment[] = [];
+      const unsubscribe = assignmentService.subscribeByWeek(week, (data) => {
+        assignments.push(...data);
+        unsubscribe();
+      });
+
+      const res = await canvasSyncService.syncWeekToCanvas(week, assignments, page);
+      
+      toast.success('Successfully Deployed to Canvas', {
+        description: `Page created and assignments linked. ${res.moduleStatus}.`
+      });
     } catch (err) {
-      toast.error('Deployment failed');
+      console.error(err);
+      toast.error('Deployment failed: Verify Canvas API Token in Settings.');
     } finally {
       setLoading(false);
     }

@@ -15,17 +15,17 @@ import {
   Info
 } from "lucide-react";
 
-import { CanvasAnnouncement } from "../../services/service.aiAnnouncement";
-import { Card, CardHeader, CardTitle, CardContent, CardDescription, CardFooter } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
-import { Checkbox } from "@/components/ui/checkbox";
-import { Badge } from "@/components/ui/badge";
-import { Label } from "@/components/ui/label";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { Calendar } from "@/components/ui/calendar";
-import { cn } from "@/lib/utils";
+import { GeneratedAnnouncement as CanvasAnnouncement } from "../../services/aiAnnouncementService";
+import { Card, CardHeader, CardTitle, CardContent, CardDescription, CardFooter } from "../../../components/ui/card";
+import { Button } from "../../../components/ui/button";
+import { Input } from "../../../components/ui/input";
+import { Textarea } from "../../../components/ui/textarea";
+import { Checkbox } from "../../../components/ui/checkbox";
+import { Badge } from "../../../components/ui/badge";
+import { Label } from "../../../components/ui/label";
+import { Popover, PopoverContent, PopoverTrigger } from "../../../components/ui/popover";
+import { Calendar } from "../../../components/ui/calendar";
+import { cn } from "../../../lib/utils";
 
 interface AnnouncementReviewerProps {
   announcement: CanvasAnnouncement;

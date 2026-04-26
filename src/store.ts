@@ -104,6 +104,7 @@ const createSettingsSlice: StateCreator<ThalesState, [], [], SettingsSlice> = (s
   updateCourseId: (subject, newId) => set((state) => ({
     canvasCourseIds: { ...state.canvasCourseIds, [subject]: newId }
   })),
+  // Command to pull secrets from AI Studio environment (handled by server.ts proxy usually)
 });
 
 export const useStore = create<ThalesState>()(

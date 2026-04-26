@@ -7,7 +7,12 @@ import { DashboardStatsGrid } from '../components/dashboard/DashboardStatsGrid';
 import { UpcomingTests } from '../components/dashboard/UpcomingTests';
 import { RecentActivity } from '../components/dashboard/RecentActivity';
 import { StatusSection } from '../components/dashboard/StatusSection';
+import { MissingAssetAlarms } from '../components/dashboard/MissingAssetAlarms';
 import { calculatePacingWeek } from '../services/service.calendar';
+import { Alert, AlertDescription, AlertTitle } from '../../components/ui/alert';
+import { Sparkles, ArrowRight } from 'lucide-react';
+import { Button } from '../../components/ui/button';
+import { Link } from 'react-router-dom';
 
 export function Dashboard() {
   const selectedWeek = useThalesStore((state) => state.selectedWeek);
@@ -19,6 +24,7 @@ export function Dashboard() {
   const [currentDate, setCurrentDate] = useState('');
   const [schoolWeek, setSchoolWeek] = useState<number | null>(null);
   const [schoolStatus, setSchoolStatus] = useState<string>("In Session");
+  const [showAutoDraftAlert, setShowAutoDraftAlert] = useState(false);
 
   useEffect(() => {
     const updateTimeContext = () => {
@@ -40,6 +46,11 @@ export function Dashboard() {
       }).format(now);
       
       setCurrentDate(formattedDate);
+
+      // Upgrade: Thursday Auto-Draft Check
+      if (now.getDay() === 4) { // Thursday
+        setShowAutoDraftAlert(true);
+      }
 
       // 2. Pacing Engine Context with Accurate Calendar Mappings
       if (schoolStartDate) {
@@ -68,6 +79,19 @@ export function Dashboard() {
         schoolStatus={schoolStatus}
       />
 
+      {showAutoDraftAlert && (
+        <Alert className="bg-blue-500/10 border-blue-500/20 text-blue-700 mx-4">
+          <Sparkles className="h-4 w-4 text-blue-600" />
+          <AlertTitle className="text-xs font-black uppercase tracking-widest">Autonomous Assistant: Thursday Auto-Draft</AlertTitle>
+          <AlertDescription className="text-sm flex items-center justify-between">
+            <span>I've prepared a draft of next week's newsletter with current birthdays and logic applied.</span>
+            <Button asChild size="sm" className="bg-blue-600 hover:bg-blue-700 text-white h-7 text-[10px] font-bold">
+              <Link to="/newsletters" className="flex items-center gap-1">Review Draft <ArrowRight className="w-3 h-3" /></Link>
+            </Button>
+          </AlertDescription>
+        </Alert>
+      )}
+
       {/* Main Command Center - The Focal Point */}
       <section className="pt-4">
         <CommandCenter />
@@ -90,7 +114,8 @@ export function Dashboard() {
         <div className="lg:col-span-7">
           <UpcomingTests />
         </div>
-        <div className="lg:col-span-5">
+        <div className="lg:col-span-5 space-y-6">
+          <MissingAssetAlarms courseId={useThalesStore.getState().canvasCourseIds['Homeroom'] || ''} weekId={`Week_${schoolWeek}`} />
           <RecentActivity />
         </div>
       </div>

@@ -98,6 +98,16 @@ async function startServer() {
     });
   });
 
+  // Pull Secrets Endpoint
+  app.get("/api/config/canvas-token", (req, res) => {
+    const token = process.env.CANVAS_API_TOKEN || process.env.VITE_CANVAS_API_TOKEN;
+    if (token) {
+      res.json({ token });
+    } else {
+      res.status(404).json({ error: "Canvas API Token not found in server environment" });
+    }
+  });
+
   // Vite middleware for development
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({

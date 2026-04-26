@@ -21,14 +21,40 @@ import Planner from './pages/Planner';
 import { CanvasPages } from './pages/CanvasPages';
 import { Assignments } from './pages/Assignments';
 import { Announcements } from './pages/Announcements';
+import NewsletterBuilder from './pages/NewsletterBuilder';
 import { Resources } from './pages/Resources';
 import { Settings } from './pages/Settings';
 import { Templates } from './pages/Templates';
 import { SyllabusMapper } from './components/planner/SyllabusMapper';
 import AnnouncementCommandCenter from './pages/AnnouncementCommandCenter';
 import { useStore } from './store';
+import React, { Suspense, useEffect } from 'react';
 
-import React, { Suspense } from 'react';
+const ConfigLoader = () => {
+  const { canvasApiToken, setSettings } = useStore();
+
+  useEffect(() => {
+    const pullConfig = async () => {
+      if (!canvasApiToken) {
+        try {
+          const response = await fetch('/api/config/canvas-token');
+          if (response.ok) {
+            const { token } = await response.json();
+            if (token) {
+              setSettings({ canvasApiToken: token });
+              console.log('[SYSTEM] Canvas API Token pulled from server environment.');
+            }
+          }
+        } catch (err) {
+          // Fail silently, user can still enter it manually in Settings
+        }
+      }
+    };
+    pullConfig();
+  }, [canvasApiToken, setSettings]);
+
+  return null;
+};
 
 const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
   const { user, isAllowedUser, logOut } = useAuth();
@@ -74,6 +100,7 @@ export default function App() {
 
   return (
     <QueryClientProvider client={queryClient}>
+      <ConfigLoader />
       <AuthProvider>
         <TooltipProvider>
           <BrowserRouter>
@@ -91,6 +118,7 @@ export default function App() {
                 <Route path="canvas-pages" element={<CanvasPages />} />
                 <Route path="assignments" element={<Assignments />} />
                 <Route path="announcements" element={<Announcements />} />
+                <Route path="newsletters" element={<NewsletterBuilder />} />
                 <Route path="command-center" element={<AnnouncementCommandCenter />} />
                 <Route path="resources" element={<Resources />} />
                 <Route path="settings" element={<Settings />} />
