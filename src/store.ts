@@ -35,7 +35,15 @@ interface DataSlice {
   setLastSynced: (date: Date) => void;
 }
 
-type StoreState = UISlice & AcademicSlice & DataSlice & CommandSlice;
+interface SettingsSlice {
+  geminiApiKey: string;
+  canvasApiToken: string;
+  canvasCourseId: string;
+  schoolStartDate: string | null;
+  setSettings: (settings: Partial<Pick<SettingsSlice, 'geminiApiKey' | 'canvasApiToken' | 'canvasCourseId' | 'schoolStartDate'>>) => void;
+}
+
+export type ThalesState = UISlice & AcademicSlice & DataSlice & CommandSlice & SettingsSlice;
 
 // --- Initial Constants ---
 
@@ -43,7 +51,7 @@ const initialContext = calendarService.getAcademicContext();
 
 // --- Main Store ---
 
-export const useStore = create<StoreState>()(
+export const useStore = create<ThalesState>()(
   persist(
     (set) => ({
       // UI Slice
@@ -77,10 +85,26 @@ export const useStore = create<StoreState>()(
       })),
       setLastUsedSubject: (subject: string) => set({ lastUsedSubject: subject }),
       clearHistory: () => set({ recentCommands: [], lastUsedSubject: null }),
+
+      // Settings Slice
+      geminiApiKey: (typeof process !== 'undefined' && process.env.GEMINI_API_KEY) || '',
+      canvasApiToken: (typeof process !== 'undefined' && process.env.CANVAS_API_TOKEN) || '',
+      canvasCourseId: import.meta.env.VITE_CANVAS_COURSE_ID || '',
+      schoolStartDate: null,
+      setSettings: (settings) => set((state) => ({ ...state, ...settings })),
     }),
     {
       name: 'thales-os-storage',
+      version: 2,
       storage: createJSONStorage(() => localStorage),
+      migrate: (persistedState: any, version: number) => {
+        if (version < 2) {
+          // Simple migration: just return the old state
+          // New fields will be initialized with defaults during hydration
+          return persistedState;
+        }
+        return persistedState;
+      },
       // Optionally filter what to persist
       partialize: (state) => ({
         selectedWeek: state.selectedWeek,
@@ -89,6 +113,10 @@ export const useStore = create<StoreState>()(
         favoriteTemplates: state.favoriteTemplates,
         lastUsedSubject: state.lastUsedSubject,
         sidebarOpen: state.sidebarOpen,
+        geminiApiKey: state.geminiApiKey,
+        canvasApiToken: state.canvasApiToken,
+        canvasCourseId: state.canvasCourseId,
+        schoolStartDate: state.schoolStartDate,
       }),
     }
   )

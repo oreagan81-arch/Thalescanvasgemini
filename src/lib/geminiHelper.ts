@@ -59,13 +59,14 @@ async function callWithBackoff<T>(fn: () => Promise<T>, maxRetries = 5): Promise
 // Initialize the SDK
 // Security Note: The GEMINI_API_KEY is injected by the platform.
 // Per Skill: React (Vite) uses process.env.GEMINI_API_KEY
-const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+const defaultAi = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
 export const geminiHelper = {
   /**
    * Generates standard text/HTML content safely.
    */
-  generateContent: async (prompt: string): Promise<string> => {
+  generateContent: async (prompt: string, apiKey?: string): Promise<string> => {
+    const ai = apiKey ? new GoogleGenAI({ apiKey }) : defaultAi;
     return await callWithBackoff(async () => {
       const response = await ai.models.generateContent({
         model: MODEL_NAME,
@@ -92,7 +93,8 @@ export const geminiHelper = {
    * Generates structured JSON data. 
    * Perfect for populating the Announcement Command Center.
    */
-  generateStructuredJSON: async <T>(prompt: string, schemaProperties: any, requiredFields: string[] = []): Promise<T> => {
+  generateStructuredJSON: async <T>(prompt: string, schemaProperties: any, requiredFields: string[] = [], apiKey?: string): Promise<T> => {
+    const ai = apiKey ? new GoogleGenAI({ apiKey }) : defaultAi;
     return await callWithBackoff(async () => {
       const response = await ai.models.generateContent({
         model: MODEL_NAME,

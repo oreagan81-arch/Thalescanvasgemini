@@ -16,8 +16,11 @@ import { Badge } from '@/components/ui/badge';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 
-import { generateCanvasAnnouncement, GeneratedAnnouncement } from '@/src/services/aiAnnouncementService';
+import { aiAnnouncementService, GeneratedAnnouncement } from '@/src/services/aiAnnouncementService';
+import { canvasApiService } from '@/src/services/canvasApiService';
+import { useStore } from '@/src/store';
 import { rulesEngine } from '@/src/lib/thales/rulesEngine';
+import { toast } from 'sonner';
 
 const SUGGESTIONS = [
   "Math Test 18 Friday",
@@ -27,20 +30,34 @@ const SUGGESTIONS = [
 ];
 
 export default function AnnouncementCommandCenter() {
+  const { geminiApiKey, canvasApiToken, canvasCourseId, addRecentCommand } = useStore();
   const [command, setCommand] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
+  const [isPosting, setIsPosting] = useState(false);
   const [result, setResult] = useState<GeneratedAnnouncement | null>(null);
   const [validationErrors, setValidationErrors] = useState<string[]>([]);
+  const [showApiKeyError, setShowApiKeyError] = useState(false);
 
   const handleGenerate = async () => {
     if (!command.trim()) return;
     
+    if (!geminiApiKey) {
+      setShowApiKeyError(true);
+      return;
+    }
+
     setIsGenerating(true);
     setResult(null);
     setValidationErrors([]);
+    setShowApiKeyError(false);
     
     try {
-      const resp = await generateCanvasAnnouncement(command, new Date().toLocaleDateString());
+      const resp = await aiAnnouncementService.generateCanvasAnnouncement(
+        command, 
+        new Date().toLocaleDateString(),
+        geminiApiKey
+      );
+      
       if (resp) {
         // 1. Sanitize for Canvas (Strip styles, add headers)
         resp.bodyHTML = rulesEngine.sanitizeForCanvas(resp.bodyHTML, resp.title);
@@ -63,11 +80,38 @@ export default function AnnouncementCommandCenter() {
 
         setValidationErrors(verificationResult.errors);
         setResult(resp);
+        
+        // 3. Add to history
+        addRecentCommand(command);
       }
     } catch (error: any) {
       console.error("AI Generation Error:", error);
+      toast.error(error.message || "Failed to generate announcement.");
     } finally {
       setIsGenerating(false);
+    }
+  };
+
+  const handlePostToCanvas = async () => {
+    if (!result || !canvasCourseId || !canvasApiToken) {
+      toast.error("Canvas settings are missing or announcement not generated.");
+      return;
+    }
+
+    setIsPosting(true);
+    try {
+      await canvasApiService.postAnnouncement(
+        result.title,
+        result.bodyHTML,
+        canvasCourseId,
+        canvasApiToken
+      );
+      toast.success("Announcement successfully posted to Canvas!");
+    } catch (error: any) {
+      console.error("Canvas Post Error:", error);
+      toast.error(error.message || "Failed to post to Canvas.");
+    } finally {
+      setIsPosting(false);
     }
   };
 
@@ -77,7 +121,7 @@ export default function AnnouncementCommandCenter() {
       const tempDiv = document.createElement("div");
       tempDiv.innerHTML = result.bodyHTML;
       navigator.clipboard.writeText(tempDiv.innerText || tempDiv.textContent || "");
-      alert("Announcement copied to clipboard!"); // Note: Use toast in production
+      toast.success("Announcement text copied to clipboard!");
     }
   };
 
@@ -105,6 +149,18 @@ export default function AnnouncementCommandCenter() {
         <div className="lg:col-span-5 flex flex-col space-y-4">
           <Card className="border-zinc-200 dark:border-zinc-800 shadow-sm flex-grow flex flex-col">
             <CardHeader>
+              {showApiKeyError && (
+                <div className="mb-4 p-4 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 rounded-lg flex items-start gap-3 text-amber-800 dark:text-amber-400">
+                  <AlertCircle className="w-5 h-5 mt-0.5 flex-shrink-0" />
+                  <div>
+                    <p className="font-bold text-sm">Missing Gemini API Key</p>
+                    <p className="text-xs mt-1">
+                      To use AI features, please add your <code className="bg-amber-100 dark:bg-amber-900 px-1 py-0.5 rounded">GEMINI_API_KEY</code> 
+                      in the Settings page.
+                    </p>
+                  </div>
+                </div>
+              )}
               <CardTitle className="text-lg flex items-center gap-2">
                 <Wand2 className="w-5 h-5 text-purple-500" />
                 Prompt Generator
@@ -247,8 +303,13 @@ export default function AnnouncementCommandCenter() {
                   </Button>
                   <div className="flex gap-3">
                     <Button variant="outline">Save as Draft</Button>
-                    <Button className="gap-2 bg-green-600 hover:bg-green-700 text-white">
-                      <CheckCircle2 className="w-4 h-4" /> Schedule to Canvas
+                    <Button 
+                      className="gap-2 bg-green-600 hover:bg-green-700 text-white"
+                      disabled={isPosting}
+                      onClick={handlePostToCanvas}
+                    >
+                      {isPosting ? <Sparkles className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />}
+                      {isPosting ? 'Posting...' : 'Schedule to Canvas'}
                     </Button>
                   </div>
                 </CardFooter>

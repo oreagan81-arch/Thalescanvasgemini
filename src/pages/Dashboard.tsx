@@ -1,20 +1,24 @@
 import React, { useState, useEffect } from 'react';
 import { useDashboardStats } from '../hooks/hook.useDashboardStats';
-import { useStore } from '../store';
+import { useThalesStore } from '../store';
 import { DashboardHeader } from '../components/dashboard/DashboardHeader';
 import { CommandCenter } from '../components/dashboard/CommandCenter';
 import { DashboardStatsGrid } from '../components/dashboard/DashboardStatsGrid';
 import { UpcomingTests } from '../components/dashboard/UpcomingTests';
 import { RecentActivity } from '../components/dashboard/RecentActivity';
 import { StatusSection } from '../components/dashboard/StatusSection';
+import { calculatePacingWeek } from '../services/service.calendar';
 
 export function Dashboard() {
-  const selectedWeek = useStore((state) => state.selectedWeek);
-  const selectedQuarter = useStore((state) => state.selectedQuarter);
+  const selectedWeek = useThalesStore((state) => state.selectedWeek);
+  const selectedQuarter = useThalesStore((state) => state.selectedQuarter);
+  const schoolStartDate = useThalesStore((state) => state.schoolStartDate);
 
   // Dynamic greeting and date state
   const [greeting, setGreeting] = useState('Welcome');
   const [currentDate, setCurrentDate] = useState('');
+  const [schoolWeek, setSchoolWeek] = useState<number | null>(null);
+  const [schoolStatus, setSchoolStatus] = useState<string>("In Session");
 
   useEffect(() => {
     const updateTimeContext = () => {
@@ -36,12 +40,19 @@ export function Dashboard() {
       }).format(now);
       
       setCurrentDate(formattedDate);
+
+      // 2. Pacing Engine Context with Accurate Calendar Mappings
+      if (schoolStartDate) {
+        const pacing = calculatePacingWeek(now, schoolStartDate);
+        setSchoolWeek(pacing.weekNumber);
+        setSchoolStatus(pacing.status);
+      }
     };
 
     updateTimeContext();
     const intervalId = setInterval(updateTimeContext, 60000);
     return () => clearInterval(intervalId);
-  }, []);
+  }, [schoolStartDate]);
   
   const { plannerRows, stats, loading } = useDashboardStats(selectedWeek);
   const { totalFiles, orphans, healthScore, lessonCount } = stats;
@@ -53,6 +64,8 @@ export function Dashboard() {
         name="Mr. Reagan" 
         greeting={greeting} 
         currentDate={currentDate} 
+        schoolWeek={schoolWeek}
+        schoolStatus={schoolStatus}
       />
 
       {/* Main Command Center - The Focal Point */}
@@ -68,6 +81,8 @@ export function Dashboard() {
         orphans={orphans}
         healthScore={healthScore}
         lessonCount={lessonCount}
+        schoolWeek={schoolWeek}
+        schoolStatus={schoolStatus}
       />
 
       {/* Primary Grid Layout */}

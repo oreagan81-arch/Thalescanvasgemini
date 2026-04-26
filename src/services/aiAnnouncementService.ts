@@ -1,68 +1,44 @@
-import { geminiHelper, GeneratedAnnouncement } from "../lib/geminiHelper";
-import { Type } from "@google/genai";
+import { geminiHelper } from '../lib/geminiHelper';
 
-export { type GeneratedAnnouncement };
-
-/**
- * AI Service for generating parent announcements with curriculum intelligence.
- */
-export async function generateCanvasAnnouncement(command: string, currentDateStr: string): Promise<GeneratedAnnouncement | null> {
-  const systemPrompt = `
-ACT AS: Thales Academy "Week Ahead Newsletter Strategist".
-
-DATE CALCULATION RULES:
-- The user provided a current date of ${currentDateStr}.
-- Based on this reference date, calculate the specific calendar dates for the UPCOMING week (Monday through Friday).
-- Include the academic "Week Number" (guess based on month if not specified, usually Weeks 1-36) and the calculated "Date Range" (e.g., April 27 - May 1) in the generated title.
-
-CURRICULUM SYNTHESIS RULES:
-- Synthesize a brief Math focus (e.g., "Division with remainders", "Two-digit multiplication") and a Reading/ELA focus based on typical 4th-grade pacing.
-- Reading/ELA focus MUST include a target WPM fluency benchmark (e.g., "130 WPM") and a specific grammar focus (e.g., "Subject-Verb Agreement").
-
-THE TEST SCHEDULE RULES:
-- Create a clear bulleted list of next week's assessments.
-- ALWAYS schedule the Spelling Test for Thursday.
-- ALWAYS schedule the Math Test for Friday.
-
-THE AGENDA LINK (CRITICAL):
-- You MUST include a clear "Action Item" directing parents to the weekly agenda.
-- Format this as a hyperlink using the inferred Week Number: <a href="/pages/week-X-agenda" style="color: #2563eb; text-decoration: underline;">Week X Agenda Page</a>.
-
-TONE:
-- Informative, warm, and forward-looking.
-`;
-
-  const schemaProperties = {
-    title: {
-      type: Type.STRING,
-      description: "The formatted title of the newsletter including date range and week number."
-    },
-    bodyHTML: {
-      type: Type.STRING,
-      description: "HTML formatted string with <p>, <ul>, <li>, and <strong> tags."
-    },
-    requiredAttachments: {
-      type: Type.ARRAY,
-      items: { type: Type.STRING },
-      description: "List of files that must be attached to this announcement."
-    },
-    toneAnalysis: {
-      type: Type.STRING,
-      description: "Analysis of how the response captures the informative, warm, and forward-looking tone."
-    }
-  };
-
-  const requiredFields = ["title", "bodyHTML", "requiredAttachments", "toneAnalysis"];
-
-  try {
-    const response = await geminiHelper.generateStructuredJSON<GeneratedAnnouncement>(
-      systemPrompt + "\n\nUser Command: " + command,
-      schemaProperties,
-      requiredFields
-    );
-    return response;
-  } catch (error) {
-    console.error("AI Announcement Engine Failed:", error);
-    throw error;
-  }
+export interface GeneratedAnnouncement {
+  title: string;
+  bodyHTML: string;
+  requiredAttachments: string[];
+  toneAnalysis: string;
 }
+
+export const aiAnnouncementService = {
+  generateCanvasAnnouncement: async (command: string, currentDate: string, apiKey: string): Promise<GeneratedAnnouncement> => {
+    const prompt = `
+      COMMAND: "${command}"
+      CURRENT DATE: ${currentDate}
+      
+      Task: Generate a Parent Announcement or "Week Ahead" Friday Update for Canvas.
+      
+      CRITICAL RULES TO FOLLOW:
+      1. If "Week Ahead" or "Friday Update", calculate next week's dates based on CURRENT DATE. State the Math focus (e.g., Division with remainders) and the Reading/ELA focus using deterministic WPM goals. Schedule Spelling on Thursday, Math on Friday. Include a hyperlink to the Agenda Page.
+      2. If "Math Test", identify the Power Up letter, Fact Skill, and instruct parents to practice with a timer.
+      3. If "Reading Week", state the exact Fluency Benchmark (e.g., 130 WPM with 2 or fewer errors) and select the 5 hardest spelling words to feature.
+      4. ALWAYS adhere to the Thales Academy HTML formatting rules (<h2> header, no inline styles).
+    `;
+
+    const schema = {
+      title: { type: "STRING", description: "The title of the Canvas Announcement" },
+      bodyHTML: { type: "STRING", description: "The HTML content, starting with an <h2>" },
+      requiredAttachments: { 
+        type: "ARRAY", 
+        items: { type: "STRING" },
+        description: "List of files the teacher needs to upload manually (e.g., PDFs, Study Guides)"
+      },
+      toneAnalysis: { type: "STRING", description: "A brief 3-5 word description of the tone (e.g., 'Warm, professional, forward-looking')" }
+    };
+
+    // Force structured JSON using our Enterprise Gemini Helper
+    return geminiHelper.generateStructuredJSON<GeneratedAnnouncement>(
+      prompt, 
+      schema, 
+      ['title', 'bodyHTML', 'requiredAttachments', 'toneAnalysis'], 
+      apiKey
+    );
+  }
+};
