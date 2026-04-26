@@ -74,29 +74,34 @@ export const rulesEngine = {
   },
 
   /**
-   * Validates and sanitizes HTML for Canvas compliance.
-   * Upgraded to use DOMParser to safely strip inline styles and inject Thales Headers.
+   * Validates and sanitizes HTML for Canvas compliance, enforcing Cidi Labs classes.
    */
   sanitizeForCanvas: (htmlContent: string, title: string): string => {
+    if (typeof DOMParser === 'undefined') return htmlContent;
+    
     const parser = new DOMParser();
     const doc = parser.parseFromString(htmlContent, 'text/html');
 
+    // Remove prohibited inline styles
     const elements = doc.querySelectorAll('*');
     elements.forEach(el => el.removeAttribute('style'));
 
+    // Enforce dp-header class
     const firstChild = doc.body.firstElementChild;
     if (!firstChild || !['H2', 'H3'].includes(firstChild.tagName)) {
       const header = doc.createElement('h2');
+      header.className = 'dp-header'; // Cidi Labs Enforcement
       header.textContent = title;
       doc.body.insertBefore(header, doc.body.firstChild);
+    } else {
+      firstChild.className = 'dp-header';
     }
 
     return doc.body.innerHTML;
   },
 
   /**
-   * New Method: Verifies curriculum accuracy against the Intelligence Engine
-   * Upgraded to return specific error messages instead of just a boolean.
+   * Verifies curriculum accuracy against the Intelligence Engine Pedagogical Rules.
    */
   verifyCurriculum: (
     type: 'math' | 'reading' | 'ela', 
@@ -106,16 +111,19 @@ export const rulesEngine = {
     const contentLower = generatedContent.toLowerCase();
     const errors: string[] = [];
 
+    // Brevity Mandate Audit
+    if (contentLower.includes('saxon') || contentLower.includes('shurley')) {
+        errors.push("Brevity Mandate Violation: Vendor names detected in student-facing content.");
+    }
+
     if (type === 'math') {
       const exactMathData = parseMathTest(identifier);
-      
       if (!contentLower.includes(exactMathData.powerUp.toLowerCase())) {
-        errors.push(`Missing required Power Up: ${exactMathData.powerUp}`);
+        errors.push(`Missing Power Up: ${exactMathData.powerUp}`);
       }
       if (!contentLower.includes(exactMathData.factSkill.toLowerCase())) {
-        errors.push(`Missing required Fact Skill: ${exactMathData.factSkill}`);
+        errors.push(`Missing Fact Skill: ${exactMathData.factSkill}`);
       }
-      
       return { isValid: errors.length === 0, errors };
     }
 
@@ -123,14 +131,18 @@ export const rulesEngine = {
       const exactReadingData = parseReadingWeek(identifier);
       const fluencyLabel = exactReadingData.fluencyBenchmark.label.toLowerCase();
       
-      if (!contentLower.includes(fluencyLabel)) {
-         errors.push(`Missing exact fluency benchmark string: "${exactReadingData.fluencyBenchmark.label}"`);
+      // Reading Checkout Enforcement
+      if (!contentLower.includes('100 words per minute') && !contentLower.includes('100 wpm')) {
+          errors.push("Reading Checkout Rule Violation: Missing 100 WPM fluency goal.");
       }
 
+      if (!contentLower.includes(fluencyLabel)) {
+         errors.push(`Missing fluency benchmark: "${exactReadingData.fluencyBenchmark.label}"`);
+      }
       return { isValid: errors.length === 0, errors };
     }
 
-    return { isValid: true, errors: [] };
+    return { isValid: errors.length === 0, errors };
   }
 };
 

@@ -23,10 +23,14 @@ export const pacingImportService = {
       DATA:
       ${rawText}
       
-      EXTRACTION RULES:
+      EXTRACTION & SANITIZATION RULES:
       1. Identify the 40 weeks of the school year.
       2. For each week, extract: Week Number, Dates, Math Lesson, Reading Week, Spelling Focus, History/Science, ELA Chapter.
       3. Identify any major assessments or tests.
+      4. THE BREVITY MANDATE: You MUST strip all vendor names from the extracted text. 
+         - "Saxon Math" becomes "Math"
+         - "Shurley English" or "Shurley" becomes "ELA"
+         - "Story of the World" becomes "History"
       
       Return ONLY a JSON array.
     `;
@@ -58,10 +62,20 @@ export const pacingImportService = {
         ['pacing'],
         apiKey
       );
-      return result.pacing;
+      
+      // OPTIONAL BUT RECOMMENDED: Deterministic Fallback
+      // Even if the AI fails the Brevity Mandate, we clean it up here before it hits the app state.
+      const sanitizedPacing = result.pacing.map(week => ({
+          ...week,
+          mathLesson: week.mathLesson.replace(/saxon\s+/i, ''),
+          elaChapter: week.elaChapter.replace(/shurley\s+(english\s+)?/i, ''),
+          historyScience: week.historyScience.replace(/story of the world\s+/i, '')
+      }));
+
+      return sanitizedPacing;
     } catch (error) {
       console.error("Pacing Import Error:", error);
-      throw new Error("The Intelligence Engine failed to map the spreadsheet data. Please verify the text was copied correctly.");
+      throw new Error("The Intelligence Engine failed to map the spreadsheet data. Please verify your copy-paste selection.");
     }
   }
 };
