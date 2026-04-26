@@ -41,8 +41,7 @@ export interface PlannerRow {
 const COLLECTION_NAME = 'planner_rows';
 
 export const plannerService = {
-  subscribeToWeek: (weekId: string, callback: (rows: PlannerRow[]) => void) => {
-    const userId = auth.currentUser?.uid;
+  subscribeToWeek: (userId: string, weekId: string, callback: (rows: PlannerRow[]) => void) => {
     if (!userId) return () => {};
 
     const q = query(
@@ -110,9 +109,56 @@ export const plannerService = {
   },
 
   syncFromGoogleSheet: async (weekId: string) => {
-    console.log(`📡 Inbound Sync: Fetching curriculum from Thales Master Sheet... (${CURRICULUM_SHEET_URL})`);
-    await new Promise(r => setTimeout(r, 1500));
-    return { success: true, message: "Curriculum nodes synchronized." };
+    try {
+      // 1. Get the store to access settings
+      const { useStore } = await import('../store');
+      const store = useStore.getState();
+      const url = store.pacingGuideUrl;
+      const apiKey = store.geminiApiKey;
+
+      if (!apiKey) {
+        throw new Error("Gemini API Key is required for intelligence-based sync. Please add it in Settings.");
+      }
+
+      // 2. Fetch the sheet via our proxy
+      console.log(`📡 Fetching curriculum from: ${url}`);
+      const proxyUrl = `/api/proxy/google-sheets?url=${encodeURIComponent(url)}`;
+      const response = await fetch(proxyUrl);
+      
+      if (!response.ok) {
+        throw new Error("Failed to fetch Google Sheet. Ensure the sheet is public (Anyone with link can view).");
+      }
+      
+      const rawText = await response.text();
+
+      // 3. Parse with Gemini
+      const { pacingImportService } = await import('./service.pacingImport');
+      const pacingWeeks = await pacingImportService.parse(rawText, apiKey);
+
+      // 4. Update the master store
+      store.setPlannerData(pacingWeeks);
+      store.setLastSynced(new Date());
+
+      // 5. If specific weekId is provided, we can auto-populate Firestore for that week if it's empty
+      // Extract numeric week from QxWy or Wx
+      const weekNum = parseInt(weekId.split('_').pop()?.substring(1) || "0") || parseInt(weekId.substring(1)) || 0;
+      const weekData = pacingWeeks.find(pw => pw.weekNumber === weekNum);
+
+      if (weekData) {
+        // Here we could trigger a specific population logic, but for now we'll just return success
+        // and let the user click "Generate Week Shell" or similar if they need daily rows.
+        return { 
+          success: true, 
+          message: `Master Pacing Synced. Week ${weekNum} identified as: ${weekData.mathLesson}`,
+          data: pacingWeeks
+        };
+      }
+
+      return { success: true, message: "Master Pacing Guide Synchronized.", data: pacingWeeks };
+    } catch (error) {
+      console.error("Sync Error:", error);
+      throw error;
+    }
   },
 
   triggerSnowDay: async (weekId: string, day: string) => {

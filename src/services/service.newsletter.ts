@@ -1,5 +1,6 @@
 import { useStore } from '../store';
 import { GoogleGenAI } from "@google/genai";
+import { calendarService } from './service.calendar';
 
 // Master Birthday List (Months are 0-indexed: 0 = Jan, 11 = Dec)
 export const STUDENT_BIRTHDAYS = [
@@ -134,6 +135,72 @@ export const newsletterService = {
     } catch (error) {
       console.error("Newsletter Error:", error);
       throw error;
+    }
+  },
+  async autoDraftThursdayNewsletter(): Promise<{ html: string, targetDate: string, weekId: string } | null> {
+    const { plannerData, geminiApiKey } = useStore.getState();
+    const today = new Date();
+    
+    // Identify upcoming week (next Thursday's context)
+    const nextThursday = new Date(today);
+    nextThursday.setDate(today.getDate() + 7);
+    const context = calendarService.getAcademicContext(nextThursday);
+    const weekId = calendarService.getWeekId(context);
+    
+    // In our plannerData, we find by weekNumber.
+    // Thales structured pacing is usually 1-37
+    const upcomingWeek = plannerData?.find(week => 
+      week.weekNumber === (context.quarter === 1 ? context.week : (context.quarter === 2 ? context.week + 9 : (context.quarter === 3 ? context.week + 18 : context.week + 27)))
+    );
+
+    if (!upcomingWeek || !geminiApiKey) return null;
+
+    const ai = new GoogleGenAI({ apiKey: geminiApiKey });
+    const targetDate = nextThursday.toISOString(); // Approximation
+
+    const systemPrompt = `
+      You are an elite academic assistant for Thales Academy. 
+      Your task is to AUTO-DRAFT the weekly "Homeroom Newsletter" using the following curriculum data for the upcoming week.
+
+      WEEK DATA:
+      - Week ID: ${weekId}
+      - Math: ${upcomingWeek.mathLesson}
+      - History/Science: ${upcomingWeek.historyScience}
+      - Reading: ${upcomingWeek.readingWeek}
+      - Spelling: ${upcomingWeek.spellingFocus}
+      - ELA: ${upcomingWeek.elaChapter}
+      
+      INSTRUCTIONS:
+      1. Create a warm, professional parent-facing newsletter.
+      2. Include a "What We Are Learning" section summarizing the lessons above.
+      3. Use the Cidi Labs HTML template provided.
+      4. Output ONLY the raw HTML.
+
+      TEMPLATE:
+      ${BASE_TEMPLATE}
+    `;
+
+    try {
+      const response = await ai.models.generateContent({
+        model: "gemini-1.5-flash",
+        contents: "Draft the newsletter based on the provided curriculum data.",
+        config: {
+          systemInstruction: systemPrompt,
+          temperature: 0.2
+        }
+      });
+
+      let html = response.text || "";
+      html = html.replace(/```html/g, '').replace(/```/g, '').trim();
+
+      return {
+        html,
+        targetDate,
+        weekId
+      };
+    } catch (error) {
+      console.error("Auto-draft Service Error:", error);
+      return null;
     }
   }
 };

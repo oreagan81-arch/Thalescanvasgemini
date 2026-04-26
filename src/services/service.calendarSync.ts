@@ -1,4 +1,4 @@
-import { addWeeks, parseISO, startOfWeek, isValid } from 'date-fns';
+import { addWeeks, parseISO, format, startOfWeek, isValid, addBusinessDays, isAfter, isSameDay } from 'date-fns';
 import { geminiHelper } from '../lib/geminiHelper';
 import { AcademicBreak } from '../lib/calendarMappings';
 import { PacingWeek } from './service.pacingImport';
@@ -34,6 +34,52 @@ export const calendarSync = {
           completed: false,
           syncedToCanvas: false
         }))
+      };
+    });
+  },
+
+  /**
+   * Shifts all dates (week starts and assignments) forward by X business days
+   * starting from a specific target date (e.g., a Snow Day).
+   */
+  shiftDates(plannerData: any[], fromDate: string, daysToShift: number = 1): any[] {
+    const shiftStart = parseISO(fromDate);
+    if (!isValid(shiftStart)) throw new Error("Invalid start date for shift.");
+
+    return plannerData.map(week => {
+      let newWeekStartDate = week.startDate;
+      
+      // Shift the overall week's start date if it falls on or after the snow day
+      if (week.startDate) {
+        const wDate = parseISO(week.startDate);
+        if (isAfter(wDate, shiftStart) || isSameDay(wDate, shiftStart)) {
+          // addBusinessDays automatically skips Saturdays and Sundays!
+          newWeekStartDate = format(addBusinessDays(wDate, daysToShift), 'yyyy-MM-dd');
+        }
+      }
+
+      // Shift individual assignment due dates
+      const newAssignments = (week.assignments || []).map((a: any) => {
+        if (!a.dueDate && !a.date) return a;
+        
+        // Handle whichever date field the assignment uses
+        const dateField = a.dueDate ? 'dueDate' : 'date';
+        const aDate = parseISO(a[dateField]);
+        
+        if (isAfter(aDate, shiftStart) || isSameDay(aDate, shiftStart)) {
+          return {
+            ...a,
+            [dateField]: format(addBusinessDays(aDate, daysToShift), 'yyyy-MM-dd'),
+            syncedToCanvas: false // Flag this so it gets picked up by your Pre-Flight Diff later
+          };
+        }
+        return a;
+      });
+
+      return {
+        ...week,
+        startDate: newWeekStartDate,
+        assignments: newAssignments
       };
     });
   }

@@ -28,7 +28,7 @@ import { toast } from 'sonner';
 const SUGGESTIONS = [
   "Math Test 18 Friday",
   "Reading Week 11",
-  "Shurley English Chapter 3 Test",
+  "Grammar Chapter 3 Test",
   "Weekly Friday Update"
 ];
 

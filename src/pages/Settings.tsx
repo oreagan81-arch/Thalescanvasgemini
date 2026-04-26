@@ -118,31 +118,86 @@ export function Settings() {
           </div>
 
           <div className="pt-4 space-y-3">
-            <h3 className="text-sm font-bold text-slate-400 uppercase tracking-wider">Subject-Specific Course IDs</h3>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="space-y-1">
-                <label className="text-xs font-medium text-slate-400">Homeroom ID</label>
-                <Input value={courseIds['Homeroom'] || ''} onChange={e => handleIdChange('Homeroom', e.target.value)} className="bg-black/20 border-white/5 h-9" />
+            <h3 className="text-sm font-bold text-slate-400 uppercase tracking-wider">Canvas Subject Mappings</h3>
+            <p className="text-xs text-slate-500 mb-4">Map each subject to the corresponding Canvas Course ID used for deep linking and sync.</p>
+            
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-4">
+              <div className="space-y-1.5 font-sans">
+                <label className="text-xs font-semibold text-slate-400 flex items-center gap-1.5 uppercase tracking-wide">
+                  <div className="w-1.5 h-1.5 rounded-full bg-blue-500"></div>
+                  Math Course ID
+                </label>
+                <Input 
+                  value={courseIds['Math'] || ''} 
+                  onChange={e => handleIdChange('Math', e.target.value)} 
+                  className="bg-black/20 border-white/10 h-10 text-white placeholder:text-slate-600"
+                  placeholder="21957"
+                />
               </div>
-              <div className="space-y-1">
-                <label className="text-xs font-medium text-slate-400">Math ID</label>
-                <Input value={courseIds['Math'] || ''} onChange={e => handleIdChange('Math', e.target.value)} className="bg-black/20 border-white/5 h-9" />
+
+              <div className="space-y-1.5 font-sans">
+                <label className="text-xs font-semibold text-slate-400 flex items-center gap-1.5 uppercase tracking-wide">
+                  <div className="w-1.5 h-1.5 rounded-full bg-emerald-500"></div>
+                  Reading Course ID
+                </label>
+                <Input 
+                  value={courseIds['Reading'] || ''} 
+                  onChange={e => handleIdChange('Reading', e.target.value)} 
+                  className="bg-black/20 border-white/10 h-10 text-white placeholder:text-slate-600"
+                  placeholder="21919"
+                />
               </div>
-              <div className="space-y-1">
-                <label className="text-xs font-medium text-slate-400">Reading ID</label>
-                <Input value={courseIds['Reading'] || ''} onChange={e => handleIdChange('Reading', e.target.value)} className="bg-black/20 border-white/5 h-9" />
+
+              <div className="space-y-1.5 font-sans">
+                <label className="text-xs font-semibold text-slate-400 flex items-center gap-1.5 uppercase tracking-wide">
+                  <div className="w-1.5 h-1.5 rounded-full bg-purple-500"></div>
+                  ELA Course ID
+                </label>
+                <Input 
+                  value={courseIds['ELA'] || ''} 
+                  onChange={e => handleIdChange('ELA', e.target.value)} 
+                  className="bg-black/20 border-white/10 h-10 text-white placeholder:text-slate-600"
+                  placeholder="21944"
+                />
               </div>
-              <div className="space-y-1">
-                <label className="text-xs font-medium text-slate-400">ELA ID</label>
-                <Input value={courseIds['ELA'] || ''} onChange={e => handleIdChange('ELA', e.target.value)} className="bg-black/20 border-white/5 h-9" />
+
+              <div className="space-y-1.5 font-sans">
+                <label className="text-xs font-semibold text-slate-400 flex items-center gap-1.5 uppercase tracking-wide">
+                  <div className="w-1.5 h-1.5 rounded-full bg-amber-500"></div>
+                  History Course ID
+                </label>
+                <Input 
+                  value={courseIds['History'] || ''} 
+                  onChange={e => handleIdChange('History', e.target.value)} 
+                  className="bg-black/20 border-white/10 h-10 text-white placeholder:text-slate-600"
+                  placeholder="21934"
+                />
               </div>
-              <div className="space-y-1">
-                <label className="text-xs font-medium text-slate-400">History ID</label>
-                <Input value={courseIds['History'] || ''} onChange={e => handleIdChange('History', e.target.value)} className="bg-black/20 border-white/5 h-9" />
+
+              <div className="space-y-1.5 font-sans">
+                <label className="text-xs font-semibold text-slate-400 flex items-center gap-1.5 uppercase tracking-wide">
+                  <div className="w-1.5 h-1.5 rounded-full bg-cyan-500"></div>
+                  Science Course ID
+                </label>
+                <Input 
+                  value={courseIds['Science'] || ''} 
+                  onChange={e => handleIdChange('Science', e.target.value)} 
+                  className="bg-black/20 border-white/10 h-10 text-white placeholder:text-slate-600"
+                  placeholder="21970"
+                />
               </div>
-              <div className="space-y-1">
-                <label className="text-xs font-medium text-slate-400">Science ID</label>
-                <Input value={courseIds['Science'] || ''} onChange={e => handleIdChange('Science', e.target.value)} className="bg-black/20 border-white/5 h-9" />
+
+              <div className="space-y-1.5 font-sans">
+                <label className="text-xs font-semibold text-slate-500 flex items-center gap-1.5 uppercase tracking-wide">
+                  <div className="w-1.5 h-1.5 rounded-full bg-slate-600"></div>
+                  Homeroom ID (Optional)
+                </label>
+                <Input 
+                  value={courseIds['Homeroom'] || ''} 
+                  onChange={e => handleIdChange('Homeroom', e.target.value)} 
+                  className="bg-black/20 border-white/5 h-10 text-slate-400 border-dashed"
+                  placeholder="22254"
+                />
               </div>
             </div>
           </div>

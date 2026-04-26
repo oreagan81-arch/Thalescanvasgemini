@@ -32,15 +32,41 @@ export type { AcademicBreak };
 export const calendarService = {
   calculatePacingWeek,
   getAcademicContext: (date: Date = new Date()): AcademicContext => {
-    const pacing = calculatePacingWeek(date);
-    // Rough mapping of pacing week to quarter for backward compatibility
-    // Quarters are roughly 9-10 instructional weeks
-    let quarter = 1;
-    if (pacing.weekNumber > 27) quarter = 4;
-    else if (pacing.weekNumber > 18) quarter = 3;
-    else if (pacing.weekNumber > 9) quarter = 2;
+    // Rollover logic: Friday at 4pm (16:00)
+    let calculationDate = new Date(date);
+    const day = date.getDay(); // 0: Sunday, 5: Friday, 6: Saturday
+    const hours = date.getHours();
 
-    const weekInQuarter = ((pacing.weekNumber - 1) % 9) + 1;
+    // If Friday after 4pm, or Saturday/Sunday, treat as "Next Week"
+    if ((day === 5 && hours >= 16) || day === 6 || day === 0) {
+      const daysToNextMonday = day === 0 ? 1 : (8 - day);
+      calculationDate.setDate(calculationDate.getDate() + daysToNextMonday);
+      calculationDate.setHours(12, 0, 0, 0);
+    }
+
+    const pacing = calculatePacingWeek(calculationDate);
+    
+    // Thales Academic Structure (Instructional Weeks):
+    // Q1: Weeks 1-9   (9 weeks)
+    // Q2: Weeks 10-18 (9 weeks)
+    // Q3: Weeks 19-27 (9 weeks)
+    // Q4: Weeks 28-37 (10 weeks)
+    let quarter = 1;
+    let weekInQuarter = pacing.weekNumber;
+
+    if (pacing.weekNumber >= 28) {
+      quarter = 4;
+      weekInQuarter = pacing.weekNumber - 27;
+    } else if (pacing.weekNumber >= 19) {
+      quarter = 3;
+      weekInQuarter = pacing.weekNumber - 18;
+    } else if (pacing.weekNumber >= 10) {
+      quarter = 2;
+      weekInQuarter = pacing.weekNumber - 9;
+    } else {
+      quarter = 1;
+      weekInQuarter = pacing.weekNumber;
+    }
 
     return { 
       quarter, 
@@ -56,7 +82,8 @@ export const calendarService = {
     const qData = CALENDAR_DATA.find(q => q.quarter === quarter);
     if (!qData) return [];
 
-    const qStart = parseISO(qData.start);
+    // Use T12:00:00 to prevent timezone shifts from pushing the date to the previous day (Sunday)
+    const qStart = parseISO(qData.start + "T12:00:00");
     const weekStart = addDays(qStart, (week - 1) * 7);
     
     return [0, 1, 2, 3, 4].map(dayOffset => {

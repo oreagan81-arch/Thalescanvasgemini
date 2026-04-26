@@ -148,9 +148,21 @@ export function extractReadingWeekNumber(command: string): number | null {
 }
 
 // --- ELA (SHURLEY ENGLISH) MAPPINGS ---
-// Placeholder section for Shurley English rules.
-// Rules here will dictate sentence flow, grammar checks, and ELA testing metrics,
-// entirely bypassing the Reading/Spelling maps above.
+// Shorthand translations for ELA assignments
+export const ELA_SHORTHAND: Record<string, { label: string; module: string }> = {
+  cp: { 
+    label: "Classroom Practice", 
+    module: "Language Arts - 4th Grade Shurley Classroom Practices" 
+  },
+  cc: { 
+    label: "Chapter Checkup", 
+    module: "Language Arts - 4th Grade Chapter Checkups" 
+  },
+  test: {
+    label: "Chapter Test",
+    module: "Language Arts - 4th Grade Tests"
+  }
+};
 
 export interface ParsedELATest {
   chapter: number;
@@ -164,5 +176,35 @@ export function parseELATest(chapterNumber: number): ParsedELATest {
     chapter: chapterNumber,
     grammarFocus: "Subject/Verb Agreement", 
     vocabularyWords: []
+  };
+}
+
+/**
+ * Resolves ELA shorthand codes (e.g., "cp45", "cc3", "12.5") into full descriptive titles and module paths.
+ */
+export function resolveELAResource(command: string): { title: string; modulePattern: string; isAssignment: boolean } | null {
+  // Handle decimal notation like "12.5" -> "Chapter 12, Lesson 5"
+  const decimalMatch = command.match(/^(\d+)\.(\d+)$/);
+  if (decimalMatch) {
+    return {
+      title: `Chapter ${decimalMatch[1]}, Lesson ${decimalMatch[2]}`,
+      modulePattern: "Language Arts - 4th Grade",
+      isAssignment: false
+    };
+  }
+
+  const match = command.match(/([a-zA-Z]+)\s*(\d+)/i);
+  if (!match) return null;
+
+  const code = match[1].toLowerCase();
+  const num = match[2];
+  const mapping = ELA_SHORTHAND[code];
+
+  if (!mapping) return null;
+
+  return {
+    title: `${mapping.label} ${num}`,
+    modulePattern: mapping.module,
+    isAssignment: true // CP, CC, and Tests create assignments
   };
 }

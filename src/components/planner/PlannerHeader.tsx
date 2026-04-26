@@ -1,7 +1,7 @@
 import React from 'react';
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { CalendarRange, Plus, CloudDownload, RefreshCw, Snowflake, Eraser, Wand2 } from 'lucide-react';
+import { CalendarRange, Plus, CloudDownload, RefreshCw, Snowflake, Eraser, Wand2, Cloud } from 'lucide-react';
 
 interface PlannerHeaderProps {
   week: string;
@@ -11,8 +11,8 @@ interface PlannerHeaderProps {
   syncing: boolean;
   onCreateShell: () => void;
   onSyncSheet: () => void;
-  onSnowDay: () => void;
   onCleanData: () => void;
+  children?: React.ReactNode;
 }
 
 export const PlannerHeader: React.FC<PlannerHeaderProps> = React.memo(({
@@ -23,8 +23,8 @@ export const PlannerHeader: React.FC<PlannerHeaderProps> = React.memo(({
   syncing,
   onCreateShell,
   onSyncSheet,
-  onSnowDay,
-  onCleanData
+  onCleanData,
+  children
 }) => {
   return (
     <div className="flex items-center justify-between shrink-0">
@@ -34,6 +34,8 @@ export const PlannerHeader: React.FC<PlannerHeaderProps> = React.memo(({
       </div>
       
       <div className="flex items-center gap-3">
+        {children}
+        
         <Select value={week} onValueChange={setWeek}>
           <SelectTrigger className="w-[180px] bg-white/5 border-white/10 text-white">
             <SelectValue placeholder="Select Week" />
@@ -64,11 +66,6 @@ export const PlannerHeader: React.FC<PlannerHeaderProps> = React.memo(({
         <Button onClick={onSyncSheet} disabled={syncing} variant="outline" className="border-blue-500/30 bg-blue-500/5 text-blue-400 hover:bg-blue-500/10">
           {syncing ? <RefreshCw className="w-4 h-4 mr-2 animate-spin" /> : <CloudDownload className="w-4 h-4 mr-2" />}
           Sync Sheet
-        </Button>
-
-        <Button onClick={onSnowDay} variant="outline" className="border-cyan-500/30 bg-cyan-500/5 text-cyan-400 hover:bg-cyan-500/10">
-          <Snowflake className="w-4 h-4 mr-2" />
-          Snow Day
         </Button>
 
         <Button onClick={onCleanData} disabled={syncing} variant="outline" className="border-red-500/30 bg-red-500/5 text-red-400 hover:bg-red-500/10">

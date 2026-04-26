@@ -4,26 +4,28 @@ import { announcementService, Announcement } from '../services/service.announcem
 import { draftAnnouncement } from '../lib/geminiHelper';
 import { plannerService } from '../services/service.planner';
 import { UserSettings } from '../services/service.settings';
+import { useAuth } from '../contexts/AuthContext';
 import { toast } from 'sonner';
 
 // Simple global cache for announcements to prevent re-fetching/flicker during navigation
 const announcementCache: Record<string, Announcement[]> = {};
 
 export function useAnnouncements(weekId: string) {
+  const { user } = useAuth();
   const queryClient = useQueryClient();
   const [announcements, setAnnouncements] = useState<Announcement[]>(announcementCache[weekId] || []);
   const [isLoading, setIsLoading] = useState(!announcementCache[weekId]);
 
   useEffect(() => {
-    // Return early if no weekId
-    if (!weekId) return;
+    // Return early if no weekId or user
+    if (!weekId || !user) return;
 
     // Reset loading if not in cache
     if (!announcementCache[weekId]) {
       setIsLoading(true);
     }
 
-    const unsubscribe = announcementService.subscribeByWeek(weekId, (data) => {
+    const unsubscribe = announcementService.subscribeByWeek(user.uid, weekId, (data) => {
       announcementCache[weekId] = data;
       setAnnouncements(data);
       setIsLoading(false);
@@ -36,7 +38,7 @@ export function useAnnouncements(weekId: string) {
     return () => {
       unsubscribe();
     };
-  }, [weekId, queryClient]);
+  }, [weekId, queryClient, user]);
 
   // Mutation for saving
   const saveMutation = useMutation({
@@ -57,15 +59,17 @@ export function useAnnouncements(weekId: string) {
 }
 
 export function useDraftAnnouncement() {
+  const { user } = useAuth();
   const [isDrafting, setIsDrafting] = useState(false);
 
   const draft = async (weekId: string, settings: UserSettings, command?: string) => {
+    if (!user) return null;
     try {
       setIsDrafting(true);
       
       // Get planner context
       const plannerRows = await new Promise<any[]>((resolve) => {
-        const unsubscribe = plannerService.subscribeToWeek(weekId, (rows) => {
+        const unsubscribe = plannerService.subscribeToWeek(user.uid, weekId, (rows) => {
           unsubscribe();
           resolve(rows);
         });

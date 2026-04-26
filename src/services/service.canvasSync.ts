@@ -33,7 +33,9 @@ export const canvasSyncService = {
         {
           name: assign.title,
           due_at: assign.dueDate ? (assign.dueDate.toDate ? assign.dueDate.toDate().toISOString() : assign.dueDate) : null,
-          points_possible: assign.title.toLowerCase().includes('quiz') ? 50 : 100,
+          points_possible: assign.points ?? 100,
+          grading_type: assign.gradingType || 'percent',
+          omit_from_final_grade: assign.omitFromFinalGrade || false,
           submission_types: ['online_upload']
         },
         assign.canvasId
@@ -91,6 +93,28 @@ export const canvasSyncService = {
     }
 
     return results;
+  },
+
+  /**
+   * Deploys a single assignment to Canvas.
+   */
+  deploySingleAssignment: async (assign: Assignment) => {
+    const canvasAssign = await canvasApiService.createOrUpdateAssignment(
+      assign.courseId.toString(),
+      {
+        name: assign.title,
+        due_at: assign.dueDate ? (assign.dueDate.toDate ? assign.dueDate.toDate().toISOString() : assign.dueDate) : null,
+        points_possible: assign.points ?? 100,
+        grading_type: assign.gradingType || 'percent',
+        omit_from_final_grade: assign.omitFromFinalGrade || false,
+        submission_types: ['online_upload']
+      },
+      assign.canvasId
+    );
+
+    // Update local assignment
+    await assignmentService.updateStatus(assign.id!, 'Deployed', canvasAssign.id.toString());
+    return canvasAssign;
   },
 
   /**

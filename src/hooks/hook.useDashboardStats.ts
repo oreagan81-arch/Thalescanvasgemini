@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import { resourceService, ResourceFile } from '../services/service.resource';
 import { plannerService, PlannerRow } from '../services/service.planner';
+import { useAuth } from '../contexts/AuthContext';
 
 // Module-level cache to prevent re-fetching/flicker
 const statsCache: {
@@ -12,19 +13,25 @@ const statsCache: {
 };
 
 export function useDashboardStats(weekId: string) {
+  const { user } = useAuth();
   const [resources, setResources] = useState<ResourceFile[]>(statsCache.resources);
   const [plannerRows, setPlannerRows] = useState<PlannerRow[]>(statsCache.planner[weekId] || []);
   const [loading, setLoading] = useState(!statsCache.resources.length || !statsCache.planner[weekId]);
 
   useEffect(() => {
+    if (!user) {
+      setLoading(true);
+      return;
+    }
+
     // 1. Subscribe to Resources (Global Registry)
-    const unsubscribeResources = resourceService.subscribeAll((data) => {
+    const unsubscribeResources = resourceService.subscribeAll(user.uid, (data) => {
       statsCache.resources = data;
       setResources(data);
     });
 
     // 2. Subscribe to PlannerRows (Specific Week)
-    const unsubscribePlanner = plannerService.subscribeToWeek(weekId, (data) => {
+    const unsubscribePlanner = plannerService.subscribeToWeek(user.uid, weekId, (data) => {
       statsCache.planner[weekId] = data;
       setPlannerRows(data);
       setLoading(false);
@@ -35,7 +42,7 @@ export function useDashboardStats(weekId: string) {
       unsubscribeResources();
       unsubscribePlanner();
     };
-  }, [weekId]);
+  }, [weekId, user]);
 
   // Derived Stats - Memoized to prevent recalculation on every render
   const stats = useMemo(() => {

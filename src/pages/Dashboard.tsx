@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useDashboardStats } from '../hooks/hook.useDashboardStats';
-import { useThalesStore } from '../store';
+import { useAutoDraft } from '../hooks/hook.useAutoDraft';
+import { useThalesStore, useStore } from '../store';
 import { DashboardHeader } from '../components/dashboard/DashboardHeader';
 import { CommandCenter } from '../components/dashboard/CommandCenter';
 import { DashboardStatsGrid } from '../components/dashboard/DashboardStatsGrid';
@@ -15,9 +16,13 @@ import { Button } from '../../components/ui/button';
 import { Link } from 'react-router-dom';
 
 export function Dashboard() {
-  const selectedWeek = useThalesStore((state) => state.selectedWeek);
-  const selectedQuarter = useThalesStore((state) => state.selectedQuarter);
-  const schoolStartDate = useThalesStore((state) => state.schoolStartDate);
+  useAutoDraft();
+  const selectedWeek = useStore((state) => state.selectedWeek);
+  const pendingNewsletterDraft = useStore((state) => state.pendingNewsletterDraft);
+  const setPendingNewsletterDraft = useStore((state) => state.setPendingNewsletterDraft);
+  const selectedQuarter = useStore((state) => state.selectedQuarter);
+  const schoolStartDate = useStore((state) => state.schoolStartDate);
+  const canvasCourseIds = useStore((state) => state.canvasCourseIds);
 
   // Dynamic greeting and date state
   const [greeting, setGreeting] = useState('Welcome');
@@ -47,11 +52,6 @@ export function Dashboard() {
       
       setCurrentDate(formattedDate);
 
-      // Upgrade: Thursday Auto-Draft Check
-      if (now.getDay() === 4) { // Thursday
-        setShowAutoDraftAlert(true);
-      }
-
       // 2. Pacing Engine Context with Accurate Calendar Mappings
       if (schoolStartDate) {
         const pacing = calculatePacingWeek(now, schoolStartDate);
@@ -79,15 +79,25 @@ export function Dashboard() {
         schoolStatus={schoolStatus}
       />
 
-      {showAutoDraftAlert && (
+      {pendingNewsletterDraft && (
         <Alert className="bg-blue-500/10 border-blue-500/20 text-blue-700 mx-4">
           <Sparkles className="h-4 w-4 text-blue-600" />
-          <AlertTitle className="text-xs font-black uppercase tracking-widest">Autonomous Assistant: Thursday Auto-Draft</AlertTitle>
-          <AlertDescription className="text-sm flex items-center justify-between">
-            <span>I've prepared a draft of next week's newsletter with current birthdays and logic applied.</span>
-            <Button asChild size="sm" className="bg-blue-600 hover:bg-blue-700 text-white h-7 text-[10px] font-bold">
-              <Link to="/newsletters" className="flex items-center gap-1">Review Draft <ArrowRight className="w-3 h-3" /></Link>
-            </Button>
+          <AlertTitle className="text-xs font-black uppercase tracking-widest text-blue-700">Autonomous Assistant: Newsletter Draft Ready</AlertTitle>
+          <AlertDescription className="text-sm flex items-center justify-between mt-2">
+            <span>I've prepared a draft for <strong>{pendingNewsletterDraft.weekId}</strong> with upcoming curriculum and birthdays.</span>
+            <div className="flex gap-2">
+              <Button 
+                variant="outline" 
+                size="sm" 
+                className="h-7 text-[10px] font-bold border-blue-500/30 text-blue-700"
+                onClick={() => setPendingNewsletterDraft(null)}
+              >
+                Dismiss
+              </Button>
+              <Button asChild size="sm" className="bg-blue-600 hover:bg-blue-700 text-white h-7 text-[10px] font-bold">
+                <Link to="/announcements" className="flex items-center gap-1">Review Draft <ArrowRight className="w-3 h-3" /></Link>
+              </Button>
+            </div>
           </AlertDescription>
         </Alert>
       )}
@@ -115,7 +125,7 @@ export function Dashboard() {
           <UpcomingTests />
         </div>
         <div className="lg:col-span-5 space-y-6">
-          <MissingAssetAlarms courseId={useThalesStore.getState().canvasCourseIds['Homeroom'] || ''} weekId={`Week_${schoolWeek}`} />
+          <MissingAssetAlarms courseId={canvasCourseIds?.['Homeroom'] || ''} weekId={`Week_${schoolWeek}`} />
           <RecentActivity />
         </div>
       </div>

@@ -1,6 +1,8 @@
 import { geminiHelper } from "../lib/geminiHelper";
 import { Type } from "@google/genai";
-import { extractMathTestNumber, parseMathTest } from "../lib/thales/mappings";
+import { extractMathTestNumber, parseMathTest, resolveELAResource } from "../lib/thales/mappings";
+import { resourceService } from "./service.resource";
+import { auth } from "../lib/firebase";
 
 export interface DayPlan {
   lessons: string[];
@@ -32,14 +34,12 @@ Organize the content into exactly 5 days (monday, tuesday, wednesday, thursday, 
 Each day must have:
 - lessons: List of specific lesson topics/numbers.
 - assignments: Homework or test items.
-- resources: Mentioned materials (e.g., "Workbook page 45", "Study Guide").
+- resources: Mentioned materials (e.g., "Workbook page 45", "Study Guide", "CP 45").
 
-AUDITOR COMPONENT:
-Generate "aiAuditorWarnings" if you detect:
-1. Missing core subjects (Math, Reading, Spelling, etc.).
-2. Pacing anomalies (e.g., a test being administered on a Monday without prior review).
-3. Missing study guides for upcoming tests.
-4. Incomplete data or fragments.
+THALES SPECIFIC RULES:
+1. BREVITY MANDATE: Never include vendor names (Saxon, Shurley). Use "Math", "Grammar", "ELA".
+2. ELA NOTATION: Treat decimals like "12.5" as Chapter 12, Lesson 5.
+3. CP NOTATION: Treat "CP 45" or "cp45" as Classroom Practice 45.
 `;
 
   const daySchema = {
@@ -81,30 +81,82 @@ Generate "aiAuditorWarnings" if you detect:
 
     if (!parsed) return null;
 
+    // Load active mappings from Canvas File Registry
+    const userId = auth.currentUser?.uid;
+    const resources = userId ? await resourceService.getAllResources(userId) : [];
+    const mapDict = resources.reduce((acc, m) => {
+      // Map both raw and clean names to the clean name for indexing
+      acc[m.rawName.toLowerCase()] = m.cleanName;
+      acc[m.cleanName.toLowerCase()] = m.cleanName;
+      return acc;
+    }, {} as Record<string, string>);
+
     // CRITICAL INTEGRATION: Deterministic Post-Processing
     const days = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday'] as const;
     
     days.forEach(day => {
       const dayData = parsed.weekDays[day];
       
-      // Check lessons
+      // 1. Post-process lessons
       dayData.lessons = dayData.lessons.map(lesson => {
-        const testNum = extractMathTestNumber(lesson);
+        const trimmed = lesson.trim();
+        const mapped = mapDict[trimmed.toLowerCase()];
+        if (mapped) return mapped;
+
+        // Check Math
+        const testNum = extractMathTestNumber(trimmed);
         if (testNum !== null) {
           const details = parseMathTest(testNum);
           return `[MATH TEST ${testNum}] ${details.factSkill} (${details.powerUp})`;
         }
+        
+        // Check ELA (Decimals or CP)
+        const ela = resolveELAResource(trimmed);
+        if (ela) return ela.title;
+
         return lesson;
       });
 
-      // Check assignments
-      dayData.assignments = dayData.assignments.map(assignment => {
-        const testNum = extractMathTestNumber(assignment);
+      // 2. Post-process assignments
+      const newAssignments: string[] = [...dayData.assignments];
+      
+      // Look for CP in lessons/resources to auto-generate assignments if missing
+      dayData.lessons.concat(dayData.resources).forEach(item => {
+        const trimmed = item.trim();
+        const mapped = mapDict[trimmed.toLowerCase()];
+        const lookup = mapped || trimmed;
+
+        const ela = resolveELAResource(lookup);
+        if (ela && ela.isAssignment) {
+          const finalTitle = mapped || ela.title;
+          if (!newAssignments.some(a => a.includes(finalTitle))) {
+            newAssignments.push(finalTitle);
+          }
+        }
+      });
+
+      dayData.assignments = newAssignments.map(assignment => {
+        const trimmed = assignment.trim();
+        const mapped = mapDict[trimmed.toLowerCase()];
+        if (mapped) return mapped;
+
+        const testNum = extractMathTestNumber(trimmed);
         if (testNum !== null) {
           const details = parseMathTest(testNum);
           return `[MATH TEST ${testNum}] STUDY: ${details.factSkill} (${details.powerUp})`;
         }
+
+        const ela = resolveELAResource(trimmed);
+        if (ela) return ela.title;
+
         return assignment;
+      });
+
+      // 3. Post-process resources
+      dayData.resources = dayData.resources.map(res => {
+        const trimmed = res.trim();
+        const mapped = mapDict[trimmed.toLowerCase()];
+        return mapped || trimmed;
       });
     });
 

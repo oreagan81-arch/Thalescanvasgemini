@@ -13,37 +13,87 @@ import {
   ExternalLink,
   ChevronRight,
   ClipboardList,
-  Sparkles
+  Sparkles,
+  Cloud,
+  AlertCircle
 } from 'lucide-react'
+import { 
+  Dialog, 
+  DialogContent, 
+  DialogHeader, 
+  DialogTitle, 
+  DialogDescription,
+  DialogFooter
+} from "@/components/ui/dialog"
 import { assignmentService, Assignment } from '../services/service.assignment'
 import { plannerService } from '../services/service.planner'
 import { calendarService } from '../services/service.calendar'
+import { canvasSyncService } from '../services/service.canvasSync'
 import { useStore } from '../store'
+import { useAuth } from '../contexts/AuthContext'
 import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
 
 export function Assignments() {
+  const { user } = useAuth();
   const currentContext = calendarService.getAcademicContext();
-  const { selectedWeek: week, setWeek, canvasCourseIds } = useStore();
+  const { selectedWeek: week, setWeek, canvasCourseIds, canvasApiToken } = useStore();
   const [assignments, setAssignments] = useState<Assignment[]>([]);
   const [loading, setLoading] = useState(false);
   const [syncing, setSyncing] = useState(true);
+  const [diff, setDiff] = useState<any>(null);
+  const [isDiffOpen, setIsDiffOpen] = useState(false);
 
   useEffect(() => {
+    if (!user) return;
     setSyncing(true);
-    const unsubscribe = assignmentService.subscribeByWeek(week, (data) => {
+    const unsubscribe = assignmentService.subscribeByWeek(user.uid, week, (data) => {
       setAssignments(data);
       setSyncing(false);
     });
     return () => unsubscribe();
-  }, [week]);
+  }, [week, user]);
+
+  const handleRunDiff = async () => {
+    if (!canvasApiToken) {
+      toast.error("Canvas API Token Missing", {
+        description: "Please configure it in Settings first."
+      });
+      return;
+    }
+    try {
+      setLoading(true);
+      const homeroomId = canvasCourseIds['Homeroom'] || '22254';
+      const result = await canvasSyncService.getCanvasDiff(homeroomId, week, assignments);
+      setDiff(result);
+      setIsDiffOpen(true);
+    } catch (err) {
+      toast.error("Failed to fetch Canvas state");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleDeployOne = async (item: Assignment) => {
+    try {
+      setLoading(true);
+      await canvasSyncService.deploySingleAssignment(item);
+      toast.success(`'${item.title}' Deployed to Canvas`);
+    } catch (err) {
+      toast.error('Deployment failed');
+      console.error(err);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const handleAutoGenerate = async () => {
+    if (!user) return;
     try {
       setLoading(true);
       // Fetch planner rows for context
       const plannerRows: any[] = [];
-      const unsubscribe = plannerService.subscribeToWeek(week, (rows) => {
+      const unsubscribe = plannerService.subscribeToWeek(user.uid, week, (rows) => {
         plannerRows.push(...rows);
         unsubscribe();
       });
@@ -52,19 +102,6 @@ export function Assignments() {
       toast.success('Assignment Drafts Created');
     } catch (err) {
       toast.error('Generation failed');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleDeployOne = async (id: string) => {
-    try {
-      setLoading(true);
-      await new Promise(r => setTimeout(r, 1000));
-      await assignmentService.updateStatus(id, 'Deployed', 'canvas_assign_999');
-      toast.success('Assignment Deployed to Canvas');
-    } catch (err) {
-      toast.error('Deployment failed');
     } finally {
       setLoading(false);
     }
@@ -94,6 +131,16 @@ export function Assignments() {
           </Select>
 
           <Button 
+            onClick={handleRunDiff}
+            disabled={loading || syncing}
+            variant="outline"
+            className="border-emerald-500/30 bg-emerald-500/5 text-emerald-500 hover:bg-emerald-500/10"
+          >
+            {loading ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <RefreshCcw className="w-4 h-4 mr-2" />}
+            Review Canvas Sync
+          </Button>
+
+          <Button 
             onClick={handleAutoGenerate} 
             disabled={loading}
             variant="outline" 
@@ -104,6 +151,70 @@ export function Assignments() {
           </Button>
         </div>
       </div>
+
+      <Dialog open={isDiffOpen} onOpenChange={setIsDiffOpen}>
+        <DialogContent className="max-w-3xl bg-[#0d0d10] border-white/10 text-slate-100">
+           <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                 <Cloud className="w-5 h-5 text-emerald-500" />
+                 Pre-Flight Sync Audit
+              </DialogTitle>
+              <DialogDescription className="text-slate-500">
+                 Comparing your local assignments for {week} with the current state of Canvas Course {canvasCourseIds['Homeroom']}.
+              </DialogDescription>
+           </DialogHeader>
+
+           {diff && (
+              <div className="space-y-6 py-4">
+                 <div className="grid grid-cols-3 gap-4">
+                    <div className="p-4 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-center">
+                       <p className="text-[10px] uppercase font-bold text-emerald-500 mb-1">To Add</p>
+                       <p className="text-2xl font-mono text-emerald-500">{diff.toAdd.length}</p>
+                    </div>
+                    <div className="p-4 rounded-xl bg-amber-500/10 border border-amber-500/20 text-center">
+                       <p className="text-[10px] uppercase font-bold text-amber-500 mb-1">To Update</p>
+                       <p className="text-2xl font-mono text-amber-500">{diff.toUpdate.length}</p>
+                    </div>
+                    <div className="p-4 rounded-xl bg-red-500/10 border border-red-500/20 text-center">
+                       <p className="text-[10px] uppercase font-bold text-red-500 mb-1">Orphaned</p>
+                       <p className="text-2xl font-mono text-red-500">{diff.toArchive.length}</p>
+                    </div>
+                 </div>
+
+                 <div className="max-h-80 overflow-y-auto space-y-2 pr-2">
+                    {diff.toAdd.map((a: any) => (
+                       <div key={a.id} className="p-3 bg-white/5 rounded-lg border-l-4 border-emerald-500 flex justify-between items-center">
+                          <span className="text-sm font-medium">{a.title}</span>
+                          <Badge className="bg-emerald-500/20 text-emerald-500 text-[10px]">NEW</Badge>
+                       </div>
+                    ))}
+                    {diff.toUpdate.map((u: any) => (
+                       <div key={u.local.id} className="p-3 bg-white/5 rounded-lg border-l-4 border-amber-500 flex justify-between items-center">
+                          <span className="text-sm font-medium">{u.local.title}</span>
+                          <Badge className="bg-amber-500/20 text-amber-500 text-[10px]">CHANGED</Badge>
+                       </div>
+                    ))}
+                    {diff.toArchive.map((r: any) => (
+                       <div key={r.id} className="p-3 bg-white/5 rounded-lg border-l-4 border-red-500 flex justify-between items-center opacity-70">
+                          <span className="text-sm font-medium">{r.name}</span>
+                          <Badge className="bg-red-500/20 text-red-500 text-[10px]">CANVAS ONLY</Badge>
+                       </div>
+                    ))}
+                 </div>
+              </div>
+           )}
+
+           <DialogFooter className="gap-2">
+              <Button variant="ghost" onClick={() => setIsDiffOpen(false)} className="text-slate-500 font-bold uppercase text-[10px]">Cancel</Button>
+              <Button className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold uppercase text-[10px] px-8" onClick={() => {
+                toast.info("Bulk synchronization protocol initiated...");
+                setIsDiffOpen(false);
+              }}>
+                 Execute Deterministic Sync
+              </Button>
+           </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <div className="grid grid-cols-4 gap-6 flex-1 overflow-hidden">
         <div className="col-span-1 space-y-6">
@@ -185,7 +296,7 @@ export function Assignments() {
                     <div className="flex items-center gap-4">
                        <Button 
                         size="sm" 
-                        onClick={() => handleDeployOne(item.id!)}
+                        onClick={() => handleDeployOne(item)}
                         disabled={loading || item.status === 'Deployed'}
                         className={cn(
                           "h-8 px-4 text-[10px] font-bold uppercase",

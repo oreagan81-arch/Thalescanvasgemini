@@ -16,7 +16,7 @@ import {
 import { db, auth } from '../lib/firebase';
 import { handleFirestoreError, OperationType } from '../lib/firestoreErrorHandler';
 import { COURSE_IDS, NOTIFICATION_RECIPIENT } from '../constants';
-import { extractMathTestNumber, parseMathTest } from '../lib/thales/mappings';
+import { rulesEngine } from '../lib/thales/rulesEngine';
 
 export interface Assignment {
   id?: string;
@@ -29,6 +29,9 @@ export interface Assignment {
   type: 'Assignment' | 'Quiz' | 'Discussion';
   dueDate: any;
   status: 'Pending' | 'Drafted' | 'Deployed';
+  points?: number;
+  gradingType?: 'pass_fail' | 'percent' | 'letter_grade' | 'points';
+  omitFromFinalGrade?: boolean;
   canvasId?: string;
   canvasUrl?: string; // Track Canvas link
   isGraded?: boolean;
@@ -44,15 +47,13 @@ export interface Assignment {
 const COLLECTION_NAME = 'assignments';
 
 export const assignmentService = {
-  subscribeByWeek: (weekId: string, callback: (assignments: Assignment[]) => void) => {
-    const userId = auth.currentUser?.uid;
+  subscribeByWeek: (userId: string, weekId: string, callback: (assignments: Assignment[]) => void) => {
     if (!userId) return () => {};
 
     const q = query(
       collection(db, COLLECTION_NAME),
       where('userId', '==', userId),
       where('weekId', '==', weekId),
-      orderBy('createdAt', 'desc'),
       limit(100)
     );
 
@@ -157,38 +158,29 @@ export const assignmentService = {
           targetCourseId = parseInt(courseIdsMap['Homeroom']);
         }
         
-        const testNum = extractMathTestNumber(row.lessonTitle);
-        let assignmentTitle = `[${row.subject}] ${row.lessonTitle}`;
-        let mathData = {};
-
-        if (testNum !== null) {
-          const details = parseMathTest(testNum);
-          assignmentTitle = `[MATH TEST ${testNum}] ${details.factSkill} (${details.powerUp})`;
-          mathData = {
-            testNumber: testNum,
-            powerUp: details.powerUp,
-            factSkill: details.factSkill,
-            isTimed: details.timed,
-            hasStudyGuide: details.studyGuideIncluded
-          };
+        // Use Thales deterministic rules to generate assignments
+        const generated = rulesEngine.generateAssignments(row);
+        
+        for (const gen of generated) {
+          const newRef = doc(collection(db, COLLECTION_NAME));
+          batch.set(newRef, {
+            userId,
+            weekId,
+            rowId,
+            subject: row.subject,
+            title: gen.title,
+            courseId: targetCourseId,
+            type: gen.isStudyGuide ? 'Assignment' : 'Assignment', // Distinguish more if needed
+            points: gen.points,
+            gradingType: gen.gradingType,
+            omitFromFinalGrade: gen.omitFromFinalGrade,
+            dueDate: serverTimestamp(),
+            status: 'Pending',
+            createdAt: serverTimestamp(),
+            updatedAt: serverTimestamp(),
+          });
+          writesQueued++;
         }
-
-        const newRef = doc(collection(db, COLLECTION_NAME));
-        batch.set(newRef, {
-          userId,
-          weekId,
-          rowId,
-          subject: row.subject,
-          title: assignmentTitle,
-          courseId: targetCourseId,
-          type: 'Assignment',
-          dueDate: serverTimestamp(),
-          status: 'Pending',
-          createdAt: serverTimestamp(),
-          updatedAt: serverTimestamp(),
-          ...mathData
-        });
-        writesQueued++;
 
         // Batch limit is 500
         if (writesQueued >= 450) {

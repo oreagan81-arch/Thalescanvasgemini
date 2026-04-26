@@ -28,15 +28,13 @@ export interface Announcement {
 const COLLECTION_NAME = 'announcements';
 
 export const announcementService = {
-  subscribeByWeek: (weekId: string, callback: (announcements: Announcement[]) => void) => {
-    const userId = auth.currentUser?.uid;
+  subscribeByWeek: (userId: string, weekId: string, callback: (announcements: Announcement[]) => void) => {
     if (!userId) return () => {};
 
     const q = query(
       collection(db, COLLECTION_NAME),
       where('weekId', '==', weekId),
       where('userId', '==', userId),
-      orderBy('createdAt', 'desc'),
       limit(50)
     );
 
@@ -58,14 +56,12 @@ export const announcementService = {
     });
   },
 
-  subscribeAll: (callback: (announcements: Announcement[]) => void) => {
-    const userId = auth.currentUser?.uid;
+  subscribeAll: (userId: string, callback: (announcements: Announcement[]) => void) => {
     if (!userId) return () => {};
 
     const q = query(
       collection(db, COLLECTION_NAME),
       where('userId', '==', userId),
-      orderBy('updatedAt', 'desc'),
       limit(100)
     );
 

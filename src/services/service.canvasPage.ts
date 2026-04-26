@@ -28,8 +28,7 @@ export interface CanvasPage {
 const COLLECTION_NAME = 'canvas_pages';
 
 export const canvasPageService = {
-  subscribeByWeek: (weekId: string, callback: (pages: CanvasPage[]) => void) => {
-    const userId = auth.currentUser?.uid;
+  subscribeByWeek: (userId: string, weekId: string, callback: (pages: CanvasPage[]) => void) => {
     if (!userId) return () => {};
 
     const q = query(

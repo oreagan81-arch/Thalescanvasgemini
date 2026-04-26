@@ -9,7 +9,7 @@ import { useState, useRef, useEffect } from 'react';
 const COMMON_COMMANDS = [
   'Math Test',
   'Reading Test',
-  'Shurley Quiz',
+  'Grammar Quiz',
   'Spelling Test',
   'Science Quiz',
   'History Assessment',

@@ -36,12 +36,13 @@ export function calculatePacingWeek(
   currentDateStr: string | Date,
   startDateStr: string | Date = "2025-07-21"
 ) {
-  // Using T12:00:00 to prevent timezone edge cases pushing the day backward
+  // Normalize all dates to noon to avoid DST/timezone shifts pushing days over
   const current = new Date(currentDateStr);
   const start = typeof startDateStr === 'string' ? new Date(startDateStr + "T12:00:00") : new Date(startDateStr);
   
-  current.setHours(0,0,0,0);
-  start.setHours(0,0,0,0);
+  // Set current to noon if it's not already
+  current.setHours(12, 0, 0, 0);
+  start.setHours(12, 0, 0, 0);
 
   if (current < start) {
     return { weekNumber: 0, status: "Summer Break (Pre-Term)" };
@@ -49,9 +50,12 @@ export function calculatePacingWeek(
 
   const startMonday = getMonday(start);
   const currentMonday = getMonday(current);
+  startMonday.setHours(12, 0, 0, 0);
+  currentMonday.setHours(12, 0, 0, 0);
 
   const msInWeek = 7 * 24 * 60 * 60 * 1000;
-  const elapsedWeeks = Math.floor((currentMonday.getTime() - startMonday.getTime()) / msInWeek) + 1;
+  // Calculate difference in weeks based on Mondays at noon
+  const elapsedWeeks = Math.round((currentMonday.getTime() - startMonday.getTime()) / msInWeek) + 1;
 
   let currentStatus = "In Session";
   let pausedWeeks = 0;
@@ -59,21 +63,32 @@ export function calculatePacingWeek(
   for (const b of ACADEMIC_CALENDAR_25_26) {
     const bStart = new Date(b.startDate + "T12:00:00");
     const bEnd = new Date(b.endDate + "T12:00:00");
-    bStart.setHours(0,0,0,0);
-    bEnd.setHours(23,59,59,999);
+    bStart.setHours(12, 0, 0, 0);
+    bEnd.setHours(12, 0, 0, 0);
 
     // 1. Is today during this break?
-    if (current >= bStart && current <= bEnd) {
+    // Using a inclusive range for "today"
+    const todayAtNoon = current.getTime();
+    if (todayAtNoon >= bStart.getTime() && todayAtNoon <= bEnd.getTime()) {
       currentStatus = b.name;
     }
 
     // 2. Does this break pause the week counter?
     if (b.pausesPacingWeek) {
-      const checkMonday = getMonday(bStart);
+      let checkMonday = getMonday(bStart);
+      checkMonday.setHours(12, 0, 0, 0);
+      
+      // If the Monday of the week is before the break starts, it was an instructional week
+      if (checkMonday.getTime() < bStart.getTime()) {
+        checkMonday.setDate(checkMonday.getDate() + 7);
+        checkMonday.setHours(12, 0, 0, 0);
+      }
+      
       // Count every Monday this break spans that has already passed
-      while (checkMonday <= bEnd && checkMonday <= currentMonday) {
+      while (checkMonday.getTime() <= bEnd.getTime() && checkMonday.getTime() <= currentMonday.getTime()) {
         pausedWeeks++;
         checkMonday.setDate(checkMonday.getDate() + 7);
+        checkMonday.setHours(12, 0, 0, 0);
       }
     }
   }

@@ -1,5 +1,5 @@
 // Thales Deterministic Rules Engine
-import { parseMathTest, parseReadingWeek } from './mappings';
+import { parseMathTest, parseReadingWeek, resolveELAResource } from './mappings';
 
 export type SubjectOptions = 'Math' | 'Reading' | 'Spelling' | 'Language Arts' | 'Science' | 'History';
 export type LessonType = 'Lesson' | 'Test' | 'Quiz' | 'Project' | 'Review' | 'CP';
@@ -19,6 +19,8 @@ export interface GeneratedAssignment {
   points: number;
   published: boolean;
   isStudyGuide?: boolean;
+  gradingType?: 'pass_fail' | 'percent' | 'letter_grade' | 'points';
+  omitFromFinalGrade?: boolean;
 }
 
 export const rulesEngine = {
@@ -31,28 +33,80 @@ export const rulesEngine = {
 
     if (row.subject === 'Math') {
       if (row.type === 'Test') {
-        assignments.push({ title: `Math Test ${row.lessonNum}`, points: 100, published: false });
-        assignments.push({ title: `Fact Test ${row.lessonNum}`, points: 100, published: false });
-        assignments.push({ title: `Study Guide ${row.lessonNum}`, points: 0, published: false, isStudyGuide: true });
+        assignments.push({ 
+          title: `Math Test ${row.lessonNum}`, 
+          points: 100, 
+          published: false,
+          gradingType: 'percent'
+        });
+        assignments.push({ 
+          title: `Fact Test ${row.lessonNum}`, 
+          points: 100, 
+          published: false,
+          gradingType: 'percent'
+        });
+        assignments.push({ 
+          title: `Study Guide ${row.lessonNum}`, 
+          points: 100, // Reverting to 100 as per user "all points are 100" but we can check
+          published: false, 
+          isStudyGuide: true,
+          gradingType: 'pass_fail',
+          omitFromFinalGrade: true
+        });
       } else {
         if (row.day !== 'Friday') {
-          assignments.push({ title: `Math Homework (Evens/Odds) ${row.lessonNum}`, points: 10, published: false });
+          assignments.push({ 
+            title: `Math Homework (Evens/Odds) ${row.lessonNum}`, 
+            points: 100, 
+            published: false,
+            gradingType: 'percent'
+          });
         }
       }
     }
     else if (row.subject === 'Language Arts') {
-      if (row.type === 'CP' || row.type === 'Test') {
-        assignments.push({ title: `Language Arts ${row.type === 'Test' ? 'Test' : 'CP'} ${row.lessonNum}`, points: row.type === 'Test' ? 100 : 20, published: false });
+      const command = row.lessonNum.toString().includes('.') ? row.lessonNum.toString() : `${row.type}${row.lessonNum}`;
+      const resolved = resolveELAResource(command);
+      
+      if (resolved) {
+        // Expand the lesson title for the agenda
+        row.lessonTitle = resolved.title;
+
+        if (resolved.isAssignment) {
+          assignments.push({ 
+            title: resolved.title, 
+            points: 100, 
+            published: false,
+            gradingType: 'percent'
+          });
+        }
+      } else if (row.type === 'CP' || row.type === 'Test') {
+        assignments.push({ 
+          title: `Grammar ${row.type === 'Test' ? 'Chapter Test' : 'Classroom Practice'} ${row.lessonNum}`, 
+          points: 100, 
+          published: false,
+          gradingType: 'percent'
+        });
       }
     }
     else if (row.subject === 'Science' || row.subject === 'History') {
       if (['Test', 'Quiz', 'Project'].includes(row.type)) {
-        assignments.push({ title: `${row.subject} ${row.type} ${row.lessonNum}`, points: row.type === 'Project' ? 50 : 100, published: false });
+        assignments.push({ 
+          title: `${row.subject} ${row.type} ${row.lessonNum}`, 
+          points: 100, 
+          published: false,
+          gradingType: 'percent'
+        });
       }
     }
     else if (row.subject === 'Reading' || row.subject === 'Spelling') {
       if (row.type === 'Test') {
-        assignments.push({ title: `${row.subject} Test ${row.lessonNum}`, points: 100, published: false });
+        assignments.push({ 
+          title: `${row.subject} Test ${row.lessonNum}`, 
+          points: 100, 
+          published: false,
+          gradingType: 'percent'
+        });
       }
     }
 
@@ -104,14 +158,19 @@ export const rulesEngine = {
   silentAuditor: (content: string): string => {
     if (!content) return content;
     
-    // Flag and remove specific curriculum vendors
-    const forbiddenVendors = /(Saxon|Shurley|Story of the World)/gi;
+    // Improved Regex to handle common misspellings and abbreviations
+    // Saxon: Saxon, Saxton, Saxin, Saksen
+    // Shurley: Shurley, Shirley, Shurly, Shurlee
+    // Story of the World: SOTW, Story of the World
+    const forbiddenVendors = /\b(Sa[xk]s?t?o[ni]e?(\s*Math)?|Sh[iu]rl[ey]e?(\s*(English|Grammar))?|Story\s*of\s*the\s*World|SOTW)\b/gi;
+    
     if (forbiddenVendors.test(content)) {
       console.warn("RulesEngine: Silent Auditor flagged and redacted a vendor name.");
       return content.replace(forbiddenVendors, (match) => {
-        if (match.toLowerCase().includes('saxon')) return 'Math';
-        if (match.toLowerCase().includes('shurley')) return 'ELA';
-        if (match.toLowerCase().includes('story of the world')) return 'History';
+        const m = match.toLowerCase();
+        if (m.includes('sa') || m.includes('sk')) return 'Math';
+        if (m.includes('sh')) return 'ELA';
+        if (m.includes('story') || m.includes('sotw')) return 'History';
         return 'Standard Curriculum';
       });
     }
@@ -175,8 +234,9 @@ export const rulesEngine = {
     const contentLower = generatedContent.toLowerCase();
     const errors: string[] = [];
 
-    // Brevity Mandate Audit
-    if (contentLower.includes('saxon') || contentLower.includes('shurley')) {
+    // Brevity Mandate Audit with fuzzy matching
+    const forbiddenVendors = /\b(Sa[xk]s?t?o[ni]e?|Sh[iu]rl[ey]e?|Story\s*of\s*the\s*World|SOTW)\b/i;
+    if (forbiddenVendors.test(generatedContent)) {
         errors.push("Brevity Mandate Violation: Vendor names detected in student-facing content.");
     }
 

@@ -12,6 +12,8 @@ import {
 } from 'firebase/firestore';
 import { db, auth } from '../lib/firebase';
 import { handleFirestoreError, OperationType } from '../lib/firestoreErrorHandler';
+import { useStore } from '../store';
+import { canvasApiService } from './canvasApiService';
 
 export interface ResourceFile {
   id?: string;
@@ -29,8 +31,7 @@ export interface ResourceFile {
 const COLLECTION_NAME = 'resources';
 
 export const resourceService = {
-  subscribeAll: (callback: (resources: ResourceFile[]) => void, maxResults = 100) => {
-    const userId = auth.currentUser?.uid;
+  subscribeAll: (userId: string, callback: (resources: ResourceFile[]) => void, maxResults = 100) => {
     if (!userId) return () => {};
 
     const q = query(
@@ -84,24 +85,57 @@ export const resourceService = {
     }
   },
 
+  updateCleanName: async (id: string, newName: string) => {
+    try {
+      const ref = doc(db, COLLECTION_NAME, id);
+      return await updateDoc(ref, {
+        cleanName: newName,
+        updatedAt: serverTimestamp()
+      });
+    } catch (error) {
+       handleFirestoreError(error, OperationType.UPDATE, `${COLLECTION_NAME}/${id}`);
+    }
+  },
+
+  getAllResources: async (userId: string): Promise<ResourceFile[]> => {
+    try {
+      const q = query(collection(db, COLLECTION_NAME), where('userId', '==', userId));
+      const snapshot = await getDocs(q);
+      return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as ResourceFile));
+    } catch (error) {
+      handleFirestoreError(error, OperationType.GET, COLLECTION_NAME);
+      return [];
+    }
+  },
+
   syncCanvasFiles: async () => {
     const userId = auth.currentUser?.uid;
+    const { canvasCourseIds } = useStore.getState();
     if (!userId) throw new Error("Authentication required");
 
-    try {
-      const mockFiles = [
-        { fileId: 'canvas_101', rawName: 'math_quiz_v2_final.pdf', cleanName: 'Math Quiz 24', subject: 'Math', type: 'Quiz', canvasUrl: '#' },
-        { fileId: 'canvas_202', rawName: 'reading_passage_winn_dixie.docx', cleanName: 'Ch 4 Passage', subject: 'Reading', type: 'Lesson', canvasUrl: '#' },
-        { fileId: 'canvas_303', rawName: 'science_ecosystems_slides.pptx', cleanName: 'Ecosystems Intro', subject: 'Science', type: 'Lesson', canvasUrl: '#' },
-        { fileId: 'canvas_404', rawName: 'spelling_list_week_24.pdf', cleanName: 'Spelling List 24', subject: 'Spelling', type: 'Lesson', canvasUrl: '#' },
-      ];
+    const homeroomId = canvasCourseIds['Homeroom'];
+    if (!homeroomId) return;
 
-      for (const file of mockFiles) {
-        const q = query(collection(db, COLLECTION_NAME), where('userId', '==', userId), where('fileId', '==', file.fileId));
+    try {
+      const files = await canvasApiService.getCourseFiles(homeroomId);
+      
+      for (const file of files) {
+        const q = query(
+          collection(db, COLLECTION_NAME), 
+          where('userId', '==', userId), 
+          where('fileId', '==', file.id.toString())
+        );
         const snap = await getDocs(q);
         
         if (snap.empty) {
-          await resourceService.addResource(file);
+          await resourceService.addResource({
+            fileId: file.id.toString(),
+            rawName: file.display_name,
+            cleanName: file.display_name.split('.')[0],
+            subject: 'General', // Default, logic below can refine
+            type: 'File',
+            canvasUrl: file.url
+          });
         }
       }
     } catch (error) {

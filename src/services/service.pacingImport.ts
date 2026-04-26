@@ -10,6 +10,8 @@ export interface PacingWeek {
   elaChapter: string;
   majorTests: string[];
   assignments?: any[];
+  weekId: string;
+  topic: string;
 }
 
 export const pacingImportService = {
@@ -71,6 +73,8 @@ export const pacingImportService = {
       // Even if the AI fails the Brevity Mandate, we clean it up here before it hits the app state.
       const sanitizedPacing = result.pacing.map(week => ({
           ...week,
+          weekId: `Week ${week.weekNumber}`,
+          topic: week.mathLesson.replace(/saxon\s+/i, '').split(':')[0],
           mathLesson: week.mathLesson.replace(/saxon\s+/i, ''),
           elaChapter: week.elaChapter.replace(/shurley\s+(english\s+)?/i, ''),
           historyScience: week.historyScience.replace(/story of the world\s+/i, '')

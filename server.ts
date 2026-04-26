@@ -108,6 +108,67 @@ async function startServer() {
     }
   });
 
+  // Canvas API Proxy (Avoids CORS issues)
+  app.all("/api/canvas/*", async (req, res) => {
+    const authHeader = req.headers.authorization;
+    const clientToken = authHeader?.startsWith('Bearer ') ? authHeader.substring(7) : null;
+    const token = clientToken || process.env.CANVAS_API_TOKEN || process.env.VITE_CANVAS_API_TOKEN;
+    
+    if (!token) {
+      return res.status(401).json({ error: "Canvas API Token missing. Please provide it in the Authorization header or server environment." });
+    }
+
+    const canvasPath = req.params[0];
+    const query = new URLSearchParams(req.query as any).toString();
+    const url = `https://thalesacademy.instructure.com/api/v1/${canvasPath}${query ? '?' + query : ''}`;
+
+    try {
+      const response = await fetch(url, {
+        method: req.method,
+        headers: {
+          "Authorization": `Bearer ${token}`,
+          "Content-Type": "application/json",
+          "Accept": "application/json",
+        },
+        body: ["POST", "PUT", "PATCH"].includes(req.method) ? JSON.stringify(req.body) : undefined,
+      });
+
+      const data = await response.json();
+      res.status(response.status).json(data);
+    } catch (error) {
+      console.error("Canvas Proxy Error:", error);
+      res.status(500).json({ error: "Failed to fetch from Canvas via proxy" });
+    }
+  });
+
+  // Google Sheets Proxy
+  app.get("/api/proxy/google-sheets", async (req, res) => {
+    const { url } = req.query;
+    if (!url || typeof url !== 'string') {
+      return res.status(400).json({ error: "Missing sheet URL" });
+    }
+
+    try {
+      // Transform edit URL to export CSV URL
+      let fetchUrl = url;
+      if (url.includes('/edit')) {
+        fetchUrl = url.replace(/\/edit.*$/, '/export?format=csv');
+      } else if (!url.includes('/export')) {
+        fetchUrl = url.endsWith('/') ? `${url}export?format=csv` : `${url}/export?format=csv`;
+      }
+
+      const response = await fetch(fetchUrl);
+      if (!response.ok) {
+        throw new Error(`Google Sheets responded with ${response.status}`);
+      }
+      const text = await response.text();
+      res.send(text);
+    } catch (error) {
+      console.error("Google Sheets Proxy Error:", error);
+      res.status(500).json({ error: "Failed to fetch spreadsheet data" });
+    }
+  });
+
   // Vite middleware for development
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({

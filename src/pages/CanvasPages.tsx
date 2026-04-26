@@ -1,292 +1,321 @@
-import { useState, useEffect } from 'react';
-import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card"
-import { Button } from "@/components/ui/button"
-import { Badge } from "@/components/ui/badge"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import React, { useState, useMemo } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { 
-  Wand2, 
+  FileText, 
+  Send, 
+  RefreshCcw, 
   ExternalLink, 
-  Rocket, 
-  Eye, 
-  Code, 
   CheckCircle2, 
   Loader2,
   AlertCircle,
-  RefreshCcw,
-  Eraser
-} from 'lucide-react'
-import { canvasPageService, CanvasPage } from '../services/service.canvasPage'
-import { plannerService } from '../services/service.planner'
-import { assignmentService, Assignment } from '../services/service.assignment'
-import { canvasSyncService } from '../services/service.canvasSync'
-import { calendarService } from '../services/service.calendar'
-import { useStore } from '../store'
-import { generateWeeklyAgenda } from '../lib/geminiHelper'
-import { COURSE_IDS } from '../constants'
-import { toast } from 'sonner'
-import { cn } from '@/lib/utils'
-import { useSafeHTML } from '../lib/security'
+  Link as LinkIcon,
+  ChevronDown,
+  Layers,
+  ChevronRight,
+  Home,
+  Settings as SettingsIcon
+} from 'lucide-react';
+import { toast } from 'sonner';
 
-export function CanvasPages() {
-  const { selectedWeek: week, setWeek, canvasCourseIds } = useStore();
-  const [page, setPage] = useState<CanvasPage | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [syncing, setSyncing] = useState(true);
-  const [cleaning, setCleaning] = useState(false);
-  const [viewMode, setViewMode] = useState<'preview' | 'code'>('preview');
+import { useStore } from '../store';
+import { deepLinkSyncService } from '../services/service.deepLinkSync';
+import { PlannerSyncDiff } from '../components/planner/PlannerSyncDiff';
 
-  useEffect(() => {
-    setSyncing(true);
-    const unsubscribe = canvasPageService.subscribeByWeek(week, (pages) => {
-      if (pages.length > 0) {
-        setPage(pages[0]);
-      } else {
-        setPage(null);
-      }
-      setSyncing(false);
+import { Button } from '@/components/ui/button';
+import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from '@/components/ui/card';
+import { Badge } from '@/components/ui/badge';
+import { ScrollArea } from '@/components/ui/scroll-area';
+import { cn } from '@/lib/utils';
+import { 
+  DropdownMenu, 
+  DropdownMenuContent, 
+  DropdownMenuItem, 
+  DropdownMenuTrigger 
+} from '@/components/ui/dropdown-menu';
+
+export default function CanvasPages() {
+  const navigate = useNavigate();
+  const { plannerData, canvasCourseIds, addLog, canvasApiToken } = useStore();
+  
+  // State for UI management
+  const [syncingWeek, setSyncingWeek] = useState<string | null>(null);
+  const [isBatchSyncing, setIsBatchSyncing] = useState(false);
+  const [selectedSubject, setSelectedSubject] = useState<string>('Math');
+  const [syncedWeeks, setSyncedWeeks] = useState<Set<string>>(new Set());
+
+  const currentCourseId = canvasCourseIds[selectedSubject];
+
+  /**
+   * Enhanced Error Handling for Token Expiry
+   */
+  const handleSyncError = (error: any, weekId: string) => {
+    console.error(error);
+    const isTokenError = error.message?.includes('401') || !canvasApiToken;
+
+    toast.error(isTokenError ? "Canvas Authentication Failed" : `Sync Error: ${weekId}`, {
+      description: isTokenError 
+        ? "Your API token is missing or expired. Please update it in Settings." 
+        : "The Canvas API rejected this request. Check your internet or course ID.",
+      action: isTokenError ? {
+        label: "Go to Settings",
+        onClick: () => navigate('/settings')
+      } : undefined
     });
-    return () => unsubscribe();
-  }, [week]);
+    
+    addLog(`CRITICAL: Sync failed for ${weekId}. ${error.message}`);
+  };
 
-  const handleGenerate = async () => {
-    try {
-      setLoading(true);
-      // Fetch planner rows for context
-      const plannerRows: any[] = [];
-      const unsubscribe = plannerService.subscribeToWeek(week, (rows) => {
-        plannerRows.push(...rows);
-        unsubscribe();
+  const handleDeepSync = async (week: any) => {
+    if (!currentCourseId) {
+      toast.error(`Missing Course ID`, {
+        description: `No Canvas ID found for ${selectedSubject}. Update your mapping in Settings.`
       });
+      return;
+    }
 
-      const html = await generateWeeklyAgenda(week, plannerRows);
-      if (html) {
-        await canvasPageService.upsert(week, html);
-        toast.success('Weekly Agenda Generated');
+    setSyncingWeek(week.weekId);
+    addLog(`Initiating Deep Link Sync for ${week.weekId} to ${selectedSubject}...`);
+
+    try {
+      const result = await deepLinkSyncService.executeTwoPassSync(currentCourseId, week);
+      
+      if (result.success) {
+        setSyncedWeeks(prev => new Set(prev).add(week.weekId));
+        toast.success(`Sync Successful`, {
+          description: `Created linked assignments for ${week.weekId}.`,
+          action: {
+            label: "View in Canvas",
+            onClick: () => window.open(result.pageUrl, '_blank')
+          }
+        });
+        addLog(`Success: ${week.weekId} synced with ${result.assignmentsCreated} deep links.`);
       }
-    } catch (err) {
-      console.error("Canvas Agenda Generation Error:", err);
-      toast.error('Neural Engine Error: Failed to generate Canvas HTML. Ensure your curriculum nodes are valid.');
+    } catch (error) {
+      handleSyncError(error, week.weekId);
     } finally {
-      setLoading(false);
+      setSyncingWeek(null);
     }
   };
 
-  const handleReplay = async () => {
-    if (!page) return;
-    try {
-        setLoading(true);
-        // Refresh local content from planner first
-        await handleGenerate();
-        await canvasPageService.replayPage(page.id!);
-        toast.success("Page Rebuild & Replay Triggered");
-    } catch (err) {
-        toast.error("Replay Failed");
-    } finally {
-        setLoading(false);
-    }
-  };
+  const handleBatchSync = async () => {
+    if (!currentCourseId) return;
 
-  const handleClean = async () => {
+    setIsBatchSyncing(true);
+    addLog(`STARTING BATCH SYNC: Processing entire quarter for ${selectedSubject}...`);
+    
+    let successCount = 0;
     try {
-      setCleaning(true);
-      const canvasCount = await canvasPageService.cleanDuplicates(week);
-      const assignmentCount = await assignmentService.cleanDuplicates(week);
-      toast.success(`Cleanup Complete`, { description: `Removed ${canvasCount} drafts and ${assignmentCount} redundant assignments.`});
-    } catch (err) {
-      toast.error("Cleanup Failed");
-    } finally {
-      setCleaning(false);
-    }
-  };
-
-  const handleDeploy = async () => {
-    if (!page) return;
-    try {
-      setLoading(true);
-      
-      // Fetch assignments for this week to perform two-pass sync
-      const assignments: Assignment[] = [];
-      const unsubscribe = assignmentService.subscribeByWeek(week, (data) => {
-        assignments.push(...data);
-        unsubscribe();
+      for (const week of (plannerData || [])) {
+        setSyncingWeek(week.weekId);
+        await deepLinkSyncService.executeTwoPassSync(currentCourseId, week);
+        setSyncedWeeks(prev => new Set(prev).add(week.weekId));
+        successCount++;
+      }
+      toast.success(`Batch Complete`, {
+        description: `Successfully pushed ${successCount} weeks to Canvas.`
       });
-
-      const res = await canvasSyncService.syncWeekToCanvas(week, assignments, page);
-      
-      toast.success('Successfully Deployed to Canvas', {
-        description: `Page created and assignments linked. ${res.moduleStatus}.`
-      });
-    } catch (err) {
-      console.error(err);
-      toast.error('Deployment failed: Verify Canvas API Token in Settings.');
+    } catch (error) {
+      handleSyncError(error, "Batch Process");
     } finally {
-      setLoading(false);
+      setIsBatchSyncing(false);
+      setSyncingWeek(null);
     }
   };
+
+  const subjects = useMemo(() => Object.keys(canvasCourseIds), [canvasCourseIds]);
+
+  if (!plannerData || plannerData.length === 0) {
+    return (
+      <div className="flex flex-col items-center justify-center h-[60vh] text-center space-y-4">
+        <FileText className="w-16 h-16 text-slate-700 opacity-20" />
+        <h2 className="text-xl font-semibold text-slate-400">No Planner Data Found</h2>
+        <p className="text-slate-500 max-w-sm">Import your pacing guide or syllabus in the Planner section to start building Canvas pages.</p>
+        <Button variant="outline" onClick={() => navigate('/planner')} className="mt-4">
+          Go to Planner
+        </Button>
+      </div>
+    );
+  }
 
   return (
-    <div className="space-y-6 flex flex-col h-full">
-      <div className="flex justify-between items-end">
-        <div>
-          <h1 className="text-3xl font-bold tracking-tight text-white mb-2">Canvas Builder</h1>
-          <p className="text-slate-400">Convert your Weekly Planner into high-fidelity Canvas pages.</p>
+    <div className="space-y-6 pb-20">
+      {/* Breadcrumb Navigation */}
+      <nav className="flex items-center gap-2 text-xs font-medium text-slate-500 uppercase tracking-widest mb-2">
+        <Home className="w-3 h-3" />
+        <ChevronRight className="w-3 h-3" />
+        <span onClick={() => navigate('/planner')} className="hover:text-blue-500 cursor-pointer transition-colors">Planner</span>
+        <ChevronRight className="w-3 h-3" />
+        <span className="text-slate-300">Canvas Page Builder</span>
+      </nav>
+
+      {/* Header Section */}
+      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6 pb-6 border-b border-white/5">
+        <div className="space-y-1">
+          <h1 className="text-3xl font-bold tracking-tight bg-gradient-to-r from-white to-slate-400 bg-clip-text text-transparent">
+            Page Builder
+          </h1>
+          <p className="text-muted-foreground text-sm">Automate your LMS workflow with AI-powered deep linking.</p>
         </div>
-        <div className="flex items-center gap-3">
-          <Select value={week} onValueChange={setWeek}>
-            <SelectTrigger className="w-[180px] bg-white/5 border-white/10 text-white">
-              <SelectValue placeholder="Select Week" />
-            </SelectTrigger>
-            <SelectContent className="bg-[#121216] border-white/10 text-white">
-              {[1, 2, 3, 4].map(q => 
-                [1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map(w => (
-                  <SelectItem key={`Q${q}_W${w}`} value={`Q${q}_W${w}`}>
-                    Q{q} - Week {w}
-                  </SelectItem>
-                ))
-              )}
-            </SelectContent>
-          </Select>
-          
-          <Button 
-            onClick={handleClean} 
-            disabled={loading || cleaning}
-            variant="outline" 
-            className="border-red-500/30 bg-red-500/5 text-red-500 hover:bg-red-500/10"
-          >
-            {cleaning ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Eraser className="w-4 h-4 mr-2" />}
-            Clean Drafts
-          </Button>
+        
+        <div className="flex flex-wrap items-center gap-3">
+          {/* Dynamic Subject Selector */}
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline" className="bg-black/20 border-white/10 min-w-[140px] justify-between">
+                <Layers className="w-4 h-4 mr-2 text-blue-400" />
+                {selectedSubject}
+                <ChevronDown className="w-4 h-4 ml-2 opacity-50" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="bg-[#0d0d10] border-white/10 text-slate-200">
+              {subjects.map(s => (
+                <DropdownMenuItem key={s} onClick={() => setSelectedSubject(s)} className="hover:bg-white/5">
+                  {s}
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
+
+          <PlannerSyncDiff courseId={currentCourseId} courseName={selectedSubject} />
 
           <Button 
-            onClick={handleGenerate} 
-            disabled={loading}
-            variant="outline" 
-            className="border-amber-500/30 bg-amber-500/5 text-amber-500 hover:bg-amber-500/10"
+            onClick={handleBatchSync}
+            disabled={isBatchSyncing || !currentCourseId}
+            className="bg-blue-600 hover:bg-blue-500 text-white font-bold shadow-lg shadow-blue-600/20"
           >
-            {loading ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Wand2 className="w-4 h-4 mr-2" />}
-            Update Content
+            {isBatchSyncing ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Send className="w-4 h-4 mr-2" />}
+            Sync All Weeks
           </Button>
-
-          {page && (
-            <Button 
-              onClick={handleReplay} 
-              disabled={loading}
-              variant="outline"
-              className="border-blue-500/30 bg-blue-500/5 text-blue-400 hover:bg-blue-500/10"
-            >
-              <RefreshCcw className="w-4 h-4 mr-2" />
-              Force Replay
-            </Button>
-          )}
-
-          {page && (
-            <Button 
-              onClick={handleDeploy} 
-              disabled={loading || page.status === 'Deployed'}
-              className={cn(
-                "font-bold",
-                page.status === 'Deployed' ? "bg-emerald-500 hover:bg-emerald-600 text-white" : "bg-amber-500 hover:bg-amber-400 text-black"
-              )}
-            >
-              {page.status === 'Deployed' ? <CheckCircle2 className="w-4 h-4 mr-2" /> : <Rocket className="w-4 h-4 mr-2" />}
-              {page.status === 'Deployed' ? 'Deployed' : 'Deploy to Canvas'}
-            </Button>
-          )}
         </div>
       </div>
 
-      <div className="grid grid-cols-4 gap-6 flex-1 overflow-hidden">
-        <div className="col-span-1 space-y-6">
-           <Card className="rounded-2xl border border-white/10 bg-white/5">
-              <CardHeader>
-                 <CardTitle className="text-white text-xs uppercase tracking-widest">Metadata</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                 <div className="flex flex-col gap-1">
-                    <span className="text-[10px] text-slate-500 font-bold uppercase">Status</span>
-                    <Badge variant={page?.status === 'Deployed' ? 'default' : 'outline'} className={cn(
-                      "w-fit",
-                      page?.status === 'Deployed' ? "bg-emerald-500/20 text-emerald-400 border-emerald-500/30" : "bg-amber-500/10 text-amber-500 border-amber-500/20"
-                    )}>
-                      {page?.status || 'No Draft'}
-                    </Badge>
-                 </div>
-                 <div className="flex flex-col gap-1">
-                    <span className="text-[10px] text-slate-500 font-bold uppercase">Routing ID</span>
-                    <span className="text-xs text-amber-500 font-mono">{canvasCourseIds['Homeroom'] || COURSE_IDS.Homeroom} (Homeroom)</span>
-                 </div>
-                 {page?.canvasPageId && (
-                   <div className="flex flex-col gap-1">
-                      <span className="text-[10px] text-slate-500 font-bold uppercase">Canvas ID</span>
-                      <span className="text-xs text-white font-mono">{page.canvasPageId}</span>
-                   </div>
-                 )}
-              </CardContent>
-           </Card>
-
-           <div className="p-6 bg-amber-500/10 border border-amber-500/20 rounded-2xl">
-             <h4 className="text-amber-500 text-[10px] font-bold uppercase tracking-widest mb-3">Deployment Safety</h4>
-             <p className="text-slate-400 text-xs leading-normal">
-               The "Deploy" bridge creates a new page in your Canvas Course under the 'Agendas' module. It will not overwrite existing pages unless configured in Settings.
-             </p>
-          </div>
-        </div>
-
-        <Card className="col-span-3 rounded-2xl border border-white/10 bg-[#121216] flex flex-col overflow-hidden">
-          <CardHeader className="border-b border-white/5 flex flex-row items-center justify-between shrink-0">
-            <div>
-              <CardTitle className="text-white text-sm uppercase tracking-widest flex items-center gap-2">
-                <Eye className="w-4 h-4 text-amber-500" />
-                Live Preview
-              </CardTitle>
-              <CardDescription className="text-slate-500 text-xs mt-1">Rendered Canvas HTML content.</CardDescription>
+      {!currentCourseId && (
+        <Card className="bg-amber-500/5 border-amber-500/20 border-dashed">
+          <CardContent className="flex items-center gap-4 py-4 text-amber-500">
+            <AlertCircle className="w-5 h-5 shrink-0" />
+            <div className="flex-1 text-sm">
+              <span className="font-bold">Missing Configuration:</span> No Canvas Course ID is mapped to <span className="font-bold underline">{selectedSubject}</span>.
             </div>
-            <div className="flex bg-[#0a0a0c] p-1 rounded-lg border border-white/10">
-               <Button 
-                onClick={() => setViewMode('preview')}
-                variant="ghost" 
-                size="sm" 
-                className={cn("text-[10px] uppercase font-bold px-3 h-7", viewMode === 'preview' ? "bg-white/10 text-white" : "text-slate-500 hover:text-slate-300")}
-               >
-                 <Eye className="w-3 h-3 mr-1.5" />
-                 Preview
-               </Button>
-               <Button 
-                onClick={() => setViewMode('code')}
-                variant="ghost" 
-                size="sm" 
-                className={cn("text-[10px] uppercase font-bold px-3 h-7", viewMode === 'code' ? "bg-white/10 text-white" : "text-slate-500 hover:text-slate-300")}
-               >
-                 <Code className="w-3 h-3 mr-1.5" />
-                 Code
-               </Button>
-            </div>
-          </CardHeader>
-          <CardContent className="p-0 flex-1 overflow-auto bg-white/[0.02]">
-            {!page ? (
-               <div className="flex flex-col items-center justify-center h-full text-slate-600 gap-4">
-                  <div className="w-12 h-12 rounded-full border-2 border-dashed border-white/10 flex items-center justify-center">
-                    <Loader2 className="w-6 h-6 opacity-20" />
-                  </div>
-                  <div className="text-center">
-                    <p className="text-xs uppercase font-bold tracking-widest">No Page Generated</p>
-                    <p className="text-[10px] mt-1">Click "Generate Page" to start the AI engine.</p>
-                  </div>
-               </div>
-            ) : viewMode === 'code' ? (
-              <pre className="p-6 text-[10px] font-mono text-emerald-500/80 leading-relaxed overflow-auto h-full">
-                {page.htmlContent}
-              </pre>
-            ) : (
-              <div 
-                className="p-8 prose prose-invert max-w-none text-slate-200 Thales-Canvas-Reset"
-                dangerouslySetInnerHTML={useSafeHTML(page.htmlContent)}
-              />
-            )}
+            <Button size="sm" variant="outline" onClick={() => navigate('/settings')} className="border-amber-500/20 text-amber-500 hover:bg-amber-500/10">
+              <SettingsIcon className="w-3.5 h-3.5 mr-1.5" />
+              Fix in Settings
+            </Button>
           </CardContent>
         </Card>
+      )}
+
+      {/* Instructional Note */}
+      <div className="flex items-center gap-2 text-[10px] text-slate-500 font-mono uppercase tracking-tighter bg-white/5 w-fit px-3 py-1 rounded-full border border-white/5">
+        <Info className="w-3 h-3" />
+        Note: Deep Link Sync pushes to "Pages". Ensure your weekly modules are published.
+      </div>
+
+      {/* Grid Section */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+        {plannerData.map((week) => {
+          const isSynced = syncedWeeks.has(week.weekId);
+          const isCurrentSyncing = syncingWeek === week.weekId;
+
+          return (
+            <Card key={week.weekId} className={cn(
+              "bg-[#0d0d10] border-white/10 hover:border-blue-500/30 transition-all group overflow-hidden relative",
+              isSynced && "border-emerald-500/30 shadow-[0_0_20px_-12px_rgba(16,185,129,0.3)]"
+            )}>
+              {isSynced && (
+                <div className="absolute top-0 right-0 p-2">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-500" />
+                </div>
+              )}
+
+              <CardHeader className="pb-3 border-b border-white/5 bg-black/20">
+                <div className="flex items-center justify-between">
+                  <Badge variant="outline" className="bg-blue-500/10 text-blue-500 border-none font-mono">
+                    {week.weekId}
+                  </Badge>
+                  {week.assignments?.length > 0 && (
+                     <Badge className="bg-emerald-500/10 text-emerald-500 border-none">
+                       {week.assignments.length} Assets
+                     </Badge>
+                  )}
+                </div>
+                <CardTitle className="text-lg mt-2 group-hover:text-blue-400 transition-colors line-clamp-1">
+                  {week.topic}
+                </CardTitle>
+              </CardHeader>
+              
+              <CardContent className="pt-4 h-40">
+                <ScrollArea className="h-full pr-4">
+                  <div className="space-y-2.5">
+                    {week.assignments && week.assignments.length > 0 ? (
+                      week.assignments.map((a: any, i: number) => (
+                        <div key={i} className="flex items-start gap-2 text-sm text-slate-400 group/item">
+                          <LinkIcon className="w-3.5 h-3.5 mt-0.5 text-slate-600 shrink-0 group-hover/item:text-blue-500 transition-colors" />
+                          <span className="line-clamp-2">{a.title}</span>
+                        </div>
+                      ))
+                    ) : (
+                      <p className="text-xs text-slate-500 italic">No assignments extracted for this week.</p>
+                    )}
+                  </div>
+                </ScrollArea>
+              </CardContent>
+
+              <CardFooter className="bg-black/40 border-t border-white/5 p-4 flex gap-2">
+                <Button 
+                  onClick={() => handleDeepSync(week)}
+                  disabled={!!syncingWeek || !currentCourseId}
+                  variant={isSynced ? "outline" : "default"}
+                  className={cn(
+                    "flex-1 font-bold",
+                    !isSynced && "bg-blue-600 hover:bg-blue-500 text-white shadow-lg shadow-blue-600/10",
+                    isSynced && "border-emerald-500/20 text-emerald-500 hover:bg-emerald-500/5"
+                  )}
+                >
+                  {isCurrentSyncing ? (
+                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  ) : isSynced ? (
+                    <CheckCircle2 className="w-4 h-4 mr-2" />
+                  ) : (
+                    <RefreshCcw className="w-4 h-4 mr-2" />
+                  )}
+                  {isCurrentSyncing ? "Linking..." : isSynced ? "Synced" : "Deep Link Sync"}
+                </Button>
+                <Button 
+                  variant="outline" 
+                  size="icon" 
+                  className="border-white/10 text-slate-400 hover:text-white"
+                  title="Preview Mode"
+                  onClick={() => toast.info("Direct Preview is currently being optimized for Cidi Labs compatibility.")}
+                >
+                  <ExternalLink className="w-4 h-4" />
+                </Button>
+              </CardFooter>
+            </Card>
+          );
+        })}
       </div>
     </div>
-  )
+  );
 }
 
+// Utility icon for the instructional note
+function Info(props: React.SVGProps<SVGSVGElement>) {
+  return (
+    <svg
+      {...props}
+      xmlns="http://www.w3.org/2000/svg"
+      width="24"
+      height="24"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <circle cx="12" cy="12" r="10" />
+      <path d="M12 16v-4" />
+      <path d="M12 8h.01" />
+    </svg>
+  );
+}

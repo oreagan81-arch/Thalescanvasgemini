@@ -14,22 +14,25 @@ import {
   ChevronRight
 } from 'lucide-react'
 import { resourceService, ResourceFile } from '../services/service.resource'
+import { useAuth } from '../contexts/AuthContext'
 import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
 
 export function Resources() {
+  const { user } = useAuth();
   const [resources, setResources] = useState<ResourceFile[]>([]);
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
   const [search, setSearch] = useState('');
 
   useEffect(() => {
-    const unsubscribe = resourceService.subscribeAll((data) => {
+    if (!user) return;
+    const unsubscribe = resourceService.subscribeAll(user.uid, (data) => {
       setResources(data);
       setLoading(false);
     });
     return () => unsubscribe();
-  }, []);
+  }, [user]);
 
   const handleSync = async () => {
     try {
@@ -136,9 +139,18 @@ export function Resources() {
                        <div className="h-10 w-10 bg-white/5 rounded-lg flex items-center justify-center border border-white/10">
                           <FileText className="w-5 h-5 text-slate-400 group-hover:text-amber-500 transition-colors" />
                        </div>
-                       <div>
+                        <div className="flex flex-col">
                           <div className="flex items-center gap-2">
-                             <h4 className="text-sm font-bold text-slate-100">{file.cleanName}</h4>
+                             <Input 
+                               defaultValue={file.cleanName}
+                               onBlur={(e) => {
+                                 if (e.target.value !== file.cleanName) {
+                                   resourceService.updateCleanName(file.id!, e.target.value);
+                                   toast.success('Resource master name updated');
+                                 }
+                               }}
+                               className="h-7 bg-transparent border-none focus:ring-1 focus:ring-white/20 text-sm font-bold text-slate-100 p-0 hover:bg-white/5 transition-colors w-auto"
+                             />
                              <Badge variant="outline" className="bg-white/5 text-[9px] border-white/10 text-slate-500 uppercase tracking-tighter">
                                {file.subject}
                              </Badge>

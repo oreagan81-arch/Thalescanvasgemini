@@ -18,7 +18,7 @@ const queryClient = new QueryClient({
 import { Login } from './pages/Login';
 import { Dashboard } from './pages/Dashboard';
 import Planner from './pages/Planner';
-import { CanvasPages } from './pages/CanvasPages';
+import CanvasPages from './pages/CanvasPages';
 import { Assignments } from './pages/Assignments';
 import { Announcements } from './pages/Announcements';
 import NewsletterBuilder from './pages/NewsletterBuilder';
@@ -29,6 +29,22 @@ import { SyllabusMapper } from './components/planner/SyllabusMapper';
 import AnnouncementCommandCenter from './pages/AnnouncementCommandCenter';
 import { useStore } from './store';
 import React, { Suspense, useEffect } from 'react';
+import { calendarService } from './services/service.calendar';
+
+const CalendarSynchronizer = () => {
+  const { setWeek, setQuarter } = useStore();
+
+  useEffect(() => {
+    // Force sync to current academic context on initial application load
+    const context = calendarService.getAcademicContext();
+    const weekId = calendarService.getWeekId(context);
+    setWeek(weekId);
+    setQuarter(context.quarter);
+    console.log(`[SYSTEM] Terminal state synchronized to active instructional period: ${weekId}`);
+  }, [setWeek, setQuarter]);
+
+  return null;
+};
 
 const ConfigLoader = () => {
   const { canvasApiToken, setSettings } = useStore();
@@ -97,10 +113,23 @@ const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
 
 export default function App() {
   const selectedWeek = useStore(state => state.selectedWeek);
+  const hasHydrated = useStore(state => state.hasHydrated);
+
+  if (!hasHydrated) {
+    return (
+      <div className="min-h-screen bg-[#0a0a0c] flex items-center justify-center">
+        <div className="flex flex-col items-center gap-4">
+          <div className="h-10 w-10 border-2 border-amber-500/20 border-t-amber-500 rounded-full animate-spin"></div>
+          <p className="text-slate-500 font-mono text-[10px] uppercase tracking-widest">Hydrating Thales OS...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <QueryClientProvider client={queryClient}>
       <ConfigLoader />
+      <CalendarSynchronizer />
       <AuthProvider>
         <TooltipProvider>
           <BrowserRouter>

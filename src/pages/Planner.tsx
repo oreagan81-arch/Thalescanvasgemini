@@ -20,6 +20,7 @@ import { calendarSync } from '../services/service.calendarSync';
 import { plannerService, PlannerRow } from '../services/service.planner';
 import { calendarService } from '../services/service.calendar';
 import { assignmentService } from '../services/service.assignment';
+import { useAuth } from '../contexts/AuthContext';
 
 // UI components and lib are at the project root (outside of src/)
 // Go up two levels from src/pages/ to reach the root
@@ -45,17 +46,28 @@ import { ScrollArea, ScrollBar } from '../../components/ui/scroll-area';
 import { PlannerHeader } from '../components/planner/PlannerHeader';
 import { PlannerEmptyState } from '../components/planner/PlannerEmptyState';
 import { PlannerColumn } from '../components/planner/PlannerColumn';
+import { PlannerSyncDiff } from '../components/planner/PlannerSyncDiff';
+import { PlannerSnowDay } from '../components/planner/PlannerSnowDay';
+import { OrphanSweeper } from '../components/planner/OrphanSweeper';
+import { diffEngine, DiffResult } from '../services/service.diffEngine';
 
 const DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
 
 export default function Planner() {
-  const currentContext = calendarService.getAcademicContext();
-  const [week, setWeek] = useState(calendarService.getWeekId(currentContext));
+  const { user } = useAuth();
+  const { 
+    selectedWeek: week, 
+    setWeek, 
+    plannerData, 
+    setPlannerData, 
+    canvasCourseIds, 
+    canvasApiToken 
+  } = useStore();
+  
   const [rows, setRows] = useState<PlannerRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
 
-  const { plannerData, setPlannerData } = useStore();
   const [isMagicImportOpen, setIsMagicImportOpen] = useState(false);
   const [isExtracting, setIsExtracting] = useState(false);
   const [newStartDate, setNewStartDate] = useState<Date | undefined>(new Date('2026-07-13')); // Defaulting to July 2026
@@ -73,13 +85,14 @@ export default function Planner() {
   }, [week]);
 
   useEffect(() => {
+    if (!user) return;
     setLoading(true);
-    const unsubscribe = plannerService.subscribeToWeek(week, (fetchedRows) => {
+    const unsubscribe = plannerService.subscribeToWeek(user.uid, week, (fetchedRows) => {
       setRows(fetchedRows);
       setLoading(false);
     });
     return () => unsubscribe();
-  }, [week]);
+  }, [week, user]);
 
   const handleCreateShell = useCallback(async () => {
     try {
@@ -102,24 +115,6 @@ export default function Planner() {
       toast.error("Google Sheet Sync Failed");
     } finally {
       setSyncing(false);
-    }
-  }, [week]);
-
-  const handleSnowDay = useCallback(async () => {
-    const today = new Date();
-    const dayName = DAYS[today.getDay() - 1] || 'Monday';
-    
-    const confirm = window.confirm(`Trigger Snow Day protocol for ${dayName}? Lessons will shift forward and "In-Class" will be status cleared.`);
-    if (!confirm) return;
-
-    try {
-      setLoading(true);
-      await plannerService.triggerSnowDay(week, dayName);
-      toast.success("Snow Day Protocol Complete: Schedule Shifted");
-    } catch (err) {
-      toast.error("Protocol Error");
-    } finally {
-      setLoading(false);
     }
   }, [week]);
 
@@ -209,6 +204,8 @@ export default function Planner() {
     }
   };
 
+  const homeroomId = canvasCourseIds['Homeroom'] || '22254';
+
   return (
     <div className="flex flex-col h-full space-y-6">
       <div className="flex items-center justify-between">
@@ -220,9 +217,18 @@ export default function Planner() {
           syncing={syncing}
           onCreateShell={handleCreateShell}
           onSyncSheet={handleSyncSheet}
-          onSnowDay={handleSnowDay}
           onCleanData={handleCleanData}
-        />
+        >
+          <OrphanSweeper 
+            courseId={homeroomId}
+            courseName="Homeroom"
+          />
+          <PlannerSnowDay />
+          <PlannerSyncDiff 
+            courseId={homeroomId}
+            courseName="Homeroom"
+          />
+        </PlannerHeader>
 
         <div className="flex items-center gap-2">
           {/* Magic Import Dialog */}

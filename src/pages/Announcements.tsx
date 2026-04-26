@@ -15,12 +15,13 @@ import { announcementService, Announcement } from '../services/service.announcem
 import { settingsService, UserSettings } from '../services/service.settings'
 import { templateService } from '../services/service.template'
 import { toast } from 'sonner'
-import { getAuth } from 'firebase/auth'
+import { useAuth } from '../contexts/AuthContext'
 import { useLocation } from 'react-router-dom'
+import { useThalesStore } from '../store'
 import { CommandBar } from '../components/announcements/CommandBar'
 import { PreviewCard } from '../components/announcements/PreviewCard'
 
-const SMART_CHIPS = ['Math Test', 'Reading Test', 'Spelling List', 'Shurley Quiz', 'Weekly Update'];
+const SMART_CHIPS = ['Math Test', 'Reading Test', 'Spelling List', 'Grammar Quiz', 'Weekly Update'];
 
 // Grouping helper
 const groupHistory = (announcements: Announcement[]) => {
@@ -52,8 +53,7 @@ const groupHistory = (announcements: Announcement[]) => {
 };
 
 export function Announcements() {
-  const auth = getAuth();
-  const user = auth.currentUser;
+  const { user } = useAuth();
   const location = useLocation();
   
   const currentContext = calendarService.getAcademicContext();
@@ -67,11 +67,21 @@ export function Announcements() {
 
   const { announcements, isLoading, save, isSaving } = useAnnouncements(week);
   const { draft, isDrafting } = useDraftAnnouncement();
+  const pendingNewsletterDraft = useThalesStore((state) => state.pendingNewsletterDraft);
 
   useEffect(() => {
-    const unsub = announcementService.subscribeAll(setAllHistory);
+    if (pendingNewsletterDraft && pendingNewsletterDraft.weekId === week && !localContent) {
+      setLocalContent(pendingNewsletterDraft.html);
+      setLocalSubject(`Homeroom Newsletter - ${week}`);
+      toast.info("Auto-Draft Loaded: Review and edit before posting.");
+    }
+  }, [pendingNewsletterDraft, week, localContent]);
+
+  useEffect(() => {
+    if (!user) return;
+    const unsub = announcementService.subscribeAll(user.uid, setAllHistory);
     return () => unsub();
-  }, []);
+  }, [user]);
 
   const historyGroups = groupHistory(allHistory);
 
