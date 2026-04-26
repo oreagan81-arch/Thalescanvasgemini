@@ -9,6 +9,7 @@ import {
   doc, 
   onSnapshot,
   orderBy,
+  limit,
   serverTimestamp,
   writeBatch
 } from 'firebase/firestore';
@@ -45,7 +46,8 @@ export const plannerService = {
     const q = query(
       collection(db, COLLECTION_NAME),
       where('userId', '==', userId),
-      where('weekId', '==', weekId)
+      where('weekId', '==', weekId),
+      limit(100)
     );
 
     const DAYS_ORDER = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];

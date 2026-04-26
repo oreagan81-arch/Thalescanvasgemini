@@ -74,10 +74,52 @@ export const rulesEngine = {
   },
 
   /**
-   * Validates and sanitizes HTML for Canvas compliance, enforcing Cidi Labs classes.
+   * Fix 5: NaN & Type Guarding
+   */
+  safeParseNumber: (value: any, fallback: number = 0): number => {
+    if (typeof value === 'number' && !isNaN(value)) return value;
+    if (typeof value === 'string') {
+      const parsed = parseFloat(value.replace(/[^0-9.-]+/g, ""));
+      return isNaN(parsed) ? fallback : parsed;
+    }
+    return fallback;
+  },
+
+  /**
+   * Fix 5: Brevity Mandate Enforcement (Silent Auditor)
+   */
+  silentAuditor: (content: string): string => {
+    if (!content) return content;
+    
+    // Flag and remove specific curriculum vendors
+    const forbiddenVendors = /(Saxon|Shurley|Story of the World)/gi;
+    if (forbiddenVendors.test(content)) {
+      console.warn("RulesEngine: Silent Auditor flagged and redacted a vendor name.");
+      return content.replace(forbiddenVendors, (match) => {
+        if (match.toLowerCase().includes('saxon')) return 'Math';
+        if (match.toLowerCase().includes('shurley')) return 'ELA';
+        if (match.toLowerCase().includes('story of the world')) return 'History';
+        return 'Standard Curriculum';
+      });
+    }
+    
+    return content;
+  },
+
+  /**
+   * Fix 6: Cidi Labs (DesignPlus) Enforcement
+   * Canvas requires specific structural wrappers (dp-box) and header classes (dp-header).
    */
   sanitizeForCanvas: (htmlContent: string, title: string): string => {
-    if (typeof DOMParser === 'undefined') return htmlContent;
+    if (!htmlContent) return '';
+    if (typeof DOMParser === 'undefined') {
+       // Server-side or primitive fallback
+       let sanitized = htmlContent;
+       if (!sanitized.includes('dp-box')) {
+         sanitized = `<div class="dp-box">\n${sanitized}\n</div>`;
+       }
+       return sanitized;
+    }
     
     const parser = new DOMParser();
     const doc = parser.parseFromString(htmlContent, 'text/html');
@@ -86,18 +128,27 @@ export const rulesEngine = {
     const elements = doc.querySelectorAll('*');
     elements.forEach(el => el.removeAttribute('style'));
 
-    // Enforce dp-header class
-    const firstChild = doc.body.firstElementChild;
-    if (!firstChild || !['H2', 'H3'].includes(firstChild.tagName)) {
+    // Enforce dp-header class on all headers
+    const headers = doc.querySelectorAll('h1, h2, h3, h4, h5, h6');
+    headers.forEach(h => {
+      h.classList.add('dp-header');
+    });
+
+    // Ensure at least one header exists
+    if (headers.length === 0) {
       const header = doc.createElement('h2');
-      header.className = 'dp-header'; // Cidi Labs Enforcement
+      header.className = 'dp-header';
       header.textContent = title;
       doc.body.insertBefore(header, doc.body.firstChild);
-    } else {
-      firstChild.className = 'dp-header';
     }
 
-    return doc.body.innerHTML;
+    // Enforce dp-box wrapper
+    let finalHtml = doc.body.innerHTML;
+    if (!finalHtml.includes('dp-box')) {
+      finalHtml = `<div class="dp-box">\n${finalHtml}\n</div>`;
+    }
+
+    return finalHtml;
   },
 
   /**
@@ -129,15 +180,16 @@ export const rulesEngine = {
 
     if (type === 'reading') {
       const exactReadingData = parseReadingWeek(identifier);
-      const fluencyLabel = exactReadingData.fluencyBenchmark.label.toLowerCase();
+      const benchmark = exactReadingData.fluencyBenchmark;
       
-      // Reading Checkout Enforcement
-      if (!contentLower.includes('100 words per minute') && !contentLower.includes('100 wpm')) {
-          errors.push("Reading Checkout Rule Violation: Missing 100 WPM fluency goal.");
+      // Reading Checkout Enforcement - Strict prompt alignment
+      const expectedGoal = `${benchmark.wpm} words per minute (WPM) with ${benchmark.errorLimit} or fewer errors`;
+      if (!contentLower.includes(expectedGoal.toLowerCase()) && !contentLower.includes(`${benchmark.wpm} wpm`)) {
+          errors.push(`Reading Checkout Rule Violation: Missing "${expectedGoal}" fluency goal.`);
       }
 
-      if (!contentLower.includes(fluencyLabel)) {
-         errors.push(`Missing fluency benchmark: "${exactReadingData.fluencyBenchmark.label}"`);
+      if (!contentLower.includes(benchmark.label.toLowerCase())) {
+         errors.push(`Missing fluency benchmark: "${benchmark.label}"`);
       }
       return { isValid: errors.length === 0, errors };
     }
@@ -147,4 +199,4 @@ export const rulesEngine = {
 };
 
 // Named exports for compatibility
-export const { generateAssignments, generateFriendlySlug } = rulesEngine;
+export const { generateAssignments, generateFriendlySlug, safeParseNumber, silentAuditor, sanitizeForCanvas } = rulesEngine;

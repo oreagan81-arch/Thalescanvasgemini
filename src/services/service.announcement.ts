@@ -8,6 +8,7 @@ import {
   doc, 
   onSnapshot,
   orderBy,
+  limit,
   serverTimestamp 
 } from 'firebase/firestore';
 import { db, auth } from '../lib/firebase';
@@ -34,7 +35,9 @@ export const announcementService = {
     const q = query(
       collection(db, COLLECTION_NAME),
       where('weekId', '==', weekId),
-      where('userId', '==', userId)
+      where('userId', '==', userId),
+      orderBy('createdAt', 'desc'),
+      limit(50)
     );
 
     return onSnapshot(q, (snapshot) => {
@@ -62,7 +65,8 @@ export const announcementService = {
     const q = query(
       collection(db, COLLECTION_NAME),
       where('userId', '==', userId),
-      orderBy('updatedAt', 'desc')
+      orderBy('updatedAt', 'desc'),
+      limit(100)
     );
 
     return onSnapshot(q, (snapshot) => {

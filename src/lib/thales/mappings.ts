@@ -5,7 +5,8 @@
 // architecture and does NOT use the Reading/Spelling rules.
 // ============================================================================
 
-// --- MATH CURRICULUM MAPPINGS ---
+import { rulesEngine } from './rulesEngine';
+
 export const FACT_TEST_MAP: Record<number, string> = {
   1: "Addition facts starting with 5+5, 2+9",
   2: "Addition facts starting with 5+5, 2+9",
@@ -48,11 +49,12 @@ export interface ParsedMathTest {
 }
 
 export function parseMathTest(testNumber: number): ParsedMathTest {
-  const powerUp = POWER_UP_MAP[testNumber] || "Unknown Power Up";
+  const num = rulesEngine.safeParseNumber(testNumber);
+  const powerUp = POWER_UP_MAP[num] || "Unknown Power Up";
   return {
-    testNumber,
+    testNumber: num,
     powerUp,
-    factSkill: FACT_TEST_MAP[testNumber] || "Standard Fact Practice",
+    factSkill: FACT_TEST_MAP[num] || "Standard Fact Practice",
     timed: true,
     studyGuideIncluded: true,
     powerUpUrl: `https://thalesacademy.instructure.com/files/power-up-${powerUp.toLowerCase()}-practice.pdf`,

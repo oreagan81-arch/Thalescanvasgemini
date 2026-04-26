@@ -1,127 +1,50 @@
 rules_version = '2';
-
 service cloud.firestore {
   match /databases/{database}/documents {
     
-    // =========================================================
-    // 0. GLOBAL SAFETY NET
-    // =========================================================
+    // A helper function to check if the user is signed in
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    // Default rule: Deny everything
     match /{document=**} {
       allow read, write: if false;
     }
 
-    // =========================================================
-    // 1. GLOBAL HELPERS (Eight Pillars)
-    // =========================================================
-    function isSignedIn() {
-      return request.auth != null;
-    }
-
-    function isVerified() {
-      return isSignedIn() && request.auth.token.email_verified == true;
-    }
-
-    function isOwner(userId) {
-      return isVerified() && request.auth.uid == userId;
-    }
-
-    function isAdmin() {
-      return isVerified() && (
-        request.auth.token.email == "OReagan81@gmail.com" || 
-        request.auth.token.email == "owen.reagan@thalesacademy.org"
-      );
-    }
-
-    function incoming() { return request.resource.data; }
-    function existing() { return resource.data; }
-    
-    function isValidId(id) { 
-      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$'); 
-    }
-
-    // =========================================================
-    // 2. VALIDATION BLUEPRINTS
-    // =========================================================
-    
-    function isValidPlannerRow(data) {
-      return data.keys().hasAll(['userId', 'weekId', 'day', 'subject', 'lessonTitle', 'deployStatus']) &&
-             data.userId == request.auth.uid &&
-             data.weekId is string && data.weekId.size() <= 50 &&
-             data.day in ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'] &&
-             data.subject is string && data.subject.size() <= 64 &&
-             data.lessonTitle is string && data.lessonTitle.size() <= 1024 &&
-             data.deployStatus in ['Draft', 'Ready', 'Deployed', 'Failed'];
-    }
-
-    function isValidAnnouncement(data) {
-      return data.keys().hasAll(['userId', 'weekId', 'content', 'status']) &&
-             data.userId == request.auth.uid &&
-             data.content is string && data.content.size() <= 65536 &&
-             data.status in ['Draft', 'Posted'];
-    }
-
-    // =========================================================
-    // 3. ARTIFACT SCOPED ACCESS (The User's Requested Pattern)
-    // =========================================================
-    
-    match /artifacts/{appId} {
-      // Ensure the appId is a valid slug
-      allow read: if isVerified();
-
-      // PRIVATE USER DATA: /artifacts/{appId}/users/{userId}/...
-      match /users/{userId}/{document=**} {
-        // Broad ownership check for nested data
-        allow read, write: if isOwner(userId);
-      }
-
-      // Specific enforcement for known collections inside user silos
-      match /users/{userId}/planner_rows/{rowId} {
-        allow create: if isOwner(userId) && isValidId(rowId) && isValidPlannerRow(incoming());
-        allow update: if isOwner(userId) && isValidPlannerRow(incoming()) && 
-                        incoming().diff(existing()).affectedKeys().hasOnly(['lessonTitle', 'lessonNum', 'homework', 'notes', 'resources', 'deployStatus', 'updatedAt']);
-      }
-
-      match /users/{userId}/announcements/{annId} {
-        allow create: if isOwner(userId) && isValidId(annId) && isValidAnnouncement(incoming());
-      }
+    // Lock all root-level collections where userId is stored
+    match /users/{userId} {
+      allow read, write: if isAuthenticated() && request.auth.uid == userId;
       
-      match /users/{userId}/settings/profile {
-        allow read: if isOwner(userId);
-        allow write: if isOwner(userId) && incoming().userId == userId;
-      }
-
-      // PUBLIC DATA: Shared templates, read-only globally, write by Admin
-      match /public/data/{document=**} {
-        allow read: if isVerified();
-        allow write: if isAdmin(); 
+      // Allow access to all subcollections under the user's document
+      match /{subcollection}/{docId} {
+        allow read, write: if isAuthenticated() && request.auth.uid == userId;
       }
     }
-
-    // =========================================================
-    // 4. LEGACY / TOP-LEVEL COLLECTIONS (For backwards compatibility)
-    // =========================================================
     
+    // Core Collections used by the app
+    match /announcements/{docId} {
+      allow read, write: if isAuthenticated() && request.auth.uid == resource.data.userId;
+      allow create: if isAuthenticated() && request.auth.uid == request.resource.data.userId;
+    }
+    
+    match /assignments/{docId} {
+      allow read, write: if isAuthenticated() && request.auth.uid == resource.data.userId;
+      allow create: if isAuthenticated() && request.auth.uid == request.resource.data.userId;
+    }
+
+    match /planner_rows/{docId} {
+      allow read, write: if isAuthenticated() && request.auth.uid == resource.data.userId;
+      allow create: if isAuthenticated() && request.auth.uid == request.resource.data.userId;
+    }
+
+    match /courses/{docId} {
+      allow read, write: if isAuthenticated() && request.auth.uid == resource.data.userId;
+      allow create: if isAuthenticated() && request.auth.uid == request.resource.data.userId;
+    }
+
     match /settings/{userId} {
-      allow read, write: if isOwner(userId);
-    }
-
-    match /planner_rows/{rowId} {
-      allow list: if isVerified() && resource.data.userId == request.auth.uid;
-      allow get: if isVerified() && resource.data.userId == request.auth.uid;
-      allow create: if isVerified() && isValidPlannerRow(incoming());
-      allow update: if isVerified() && resource.data.userId == request.auth.uid && isValidPlannerRow(incoming());
-      allow delete: if isVerified() && resource.data.userId == request.auth.uid;
-    }
-
-    match /announcements/{annId} {
-      allow list: if isVerified() && resource.data.userId == request.auth.uid;
-      allow create: if isVerified() && isValidAnnouncement(incoming());
-      allow get, update, delete: if isVerified() && resource.data.userId == request.auth.uid;
-    }
-
-    match /weeks/{weekId} {
-      allow read: if isVerified();
-      allow write: if isAdmin();
+      allow read, write: if isAuthenticated() && request.auth.uid == userId;
     }
   }
 }

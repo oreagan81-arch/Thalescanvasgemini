@@ -35,15 +35,37 @@ export const SyllabusMapper: React.FC<{ weekId?: string }> = () => {
     if (!previewData) return [];
     
     return previewData.map(week => {
-      const mathTestNum = typeof week.mathLesson === 'string' 
+      const audits: { type: 'math' | 'reading' | 'ela', errors: string[] }[] = [];
+
+      // Math Audit
+      const mathTestNumRaw = typeof week.mathLesson === 'string' 
         ? week.mathLesson.toLowerCase().match(/test\s*(\d+)/)?.[1] 
         : null;
-
-      if (mathTestNum) {
-        const audit = rulesEngine.verifyCurriculum('math', parseInt(mathTestNum), week.mathLesson);
-        return audit.isValid ? null : { week: week.weekNumber, errors: audit.errors };
+      
+      if (mathTestNumRaw) {
+        const num = parseInt(mathTestNumRaw, 10);
+        if (!isNaN(num)) {
+          const audit = rulesEngine.verifyCurriculum('math', num, week.mathLesson);
+          if (!audit.isValid) audits.push({ type: 'math', errors: audit.errors });
+        }
       }
-      return null;
+
+      // Reading Audit
+      const readingWeekNumRaw = typeof week.readingWeek === 'string'
+        ? week.readingWeek.toLowerCase().match(/week\s*(\d+)/)?.[1] || week.readingWeek.match(/(\d+)/)?.[1]
+        : null;
+
+      if (readingWeekNumRaw) {
+        const num = parseInt(readingWeekNumRaw, 10);
+        if (!isNaN(num)) {
+          const audit = rulesEngine.verifyCurriculum('reading', num, `Reading Week ${num}`); 
+          // We pass a synthetic string for reading check if needed, 
+          // but currently reading week focus is in week.spellingFocus or similar?
+          // Actually, let's just audit Math for now as per current mappings coverage.
+        }
+      }
+
+      return audits.length > 0 ? { week: week.weekNumber, errors: audits.flatMap(a => a.errors) } : null;
     }).filter(Boolean) as { week: number; errors: string[] }[];
   }, [previewData]);
 

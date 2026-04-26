@@ -9,7 +9,9 @@ import {
   doc, 
   onSnapshot,
   orderBy,
-  serverTimestamp 
+  limit,
+  serverTimestamp,
+  writeBatch
 } from 'firebase/firestore';
 import { db, auth } from '../lib/firebase';
 import { handleFirestoreError, OperationType } from '../lib/firestoreErrorHandler';
@@ -48,7 +50,9 @@ export const assignmentService = {
     const q = query(
       collection(db, COLLECTION_NAME),
       where('userId', '==', userId),
-      where('weekId', '==', weekId)
+      where('weekId', '==', weekId),
+      orderBy('createdAt', 'desc'),
+      limit(100)
     );
 
     return onSnapshot(q, (snapshot) => {
@@ -96,9 +100,12 @@ export const assignmentService = {
         }
       });
 
-      for (const id of toDelete) {
-        const ref = doc(db, COLLECTION_NAME, id);
-        await deleteDoc(ref);
+      if (toDelete.length > 0) {
+        const batch = writeBatch(db);
+        toDelete.forEach(id => {
+          batch.delete(doc(db, COLLECTION_NAME, id));
+        });
+        await batch.commit();
       }
 
       return toDelete.length;
@@ -125,55 +132,73 @@ export const assignmentService = {
     const userId = auth.currentUser?.uid;
     if (!userId) throw new Error("Authentication required");
 
+    const batch = writeBatch(db);
+    let writesQueued = 0;
+
     try {
+      // Sync Efficiency: Cache existing rowIds for the current week to prevent redundant writes
+      const existingQ = query(
+        collection(db, COLLECTION_NAME), 
+        where('userId', '==', userId),
+        where('weekId', '==', weekId)
+      );
+      const existingSnap = await getDocs(existingQ);
+      const existingRowIds = new Set(existingSnap.docs.map(d => d.data().rowId));
+
       for (const row of plannerRows) {
-        if (!row.lessonTitle) continue;
+        const rowId = row.id || row.rowId;
+        if (!row.lessonTitle || existingRowIds.has(rowId)) continue;
         
-        const q = query(
-          collection(db, COLLECTION_NAME), 
-          where('userId', '==', userId),
-          where('rowId', '==', row.id || row.rowId)
-        );
-        const snap = await getDocs(q);
-        
-        if (snap.empty) {
-          let targetCourseId = (COURSE_IDS as any)[row.subject] || COURSE_IDS.Homeroom;
-          if (courseIdsMap && courseIdsMap[row.subject]) {
-            targetCourseId = parseInt(courseIdsMap[row.subject]);
-          } else if (courseIdsMap && courseIdsMap['Homeroom']) {
-            targetCourseId = parseInt(courseIdsMap['Homeroom']);
-          }
-          
-          const testNum = extractMathTestNumber(row.lessonTitle);
-          let assignmentTitle = `[${row.subject}] ${row.lessonTitle}`;
-          let mathData = {};
-
-          if (testNum !== null) {
-            const details = parseMathTest(testNum);
-            assignmentTitle = `[MATH TEST ${testNum}] ${details.factSkill} (${details.powerUp})`;
-            mathData = {
-              testNumber: testNum,
-              powerUp: details.powerUp,
-              factSkill: details.factSkill,
-              isTimed: details.timed,
-              hasStudyGuide: details.studyGuideIncluded
-            };
-          }
-
-          await addDoc(collection(db, COLLECTION_NAME), {
-            userId,
-            weekId,
-            rowId: row.id || row.rowId,
-            subject: row.subject,
-            title: assignmentTitle,
-            courseId: targetCourseId,
-            type: 'Assignment',
-            dueDate: serverTimestamp(),
-            status: 'Pending',
-            createdAt: serverTimestamp(),
-            ...mathData
-          });
+        let targetCourseId = (COURSE_IDS as any)[row.subject] || COURSE_IDS.Homeroom;
+        if (courseIdsMap && courseIdsMap[row.subject]) {
+          targetCourseId = parseInt(courseIdsMap[row.subject]);
+        } else if (courseIdsMap && courseIdsMap['Homeroom']) {
+          targetCourseId = parseInt(courseIdsMap['Homeroom']);
         }
+        
+        const testNum = extractMathTestNumber(row.lessonTitle);
+        let assignmentTitle = `[${row.subject}] ${row.lessonTitle}`;
+        let mathData = {};
+
+        if (testNum !== null) {
+          const details = parseMathTest(testNum);
+          assignmentTitle = `[MATH TEST ${testNum}] ${details.factSkill} (${details.powerUp})`;
+          mathData = {
+            testNumber: testNum,
+            powerUp: details.powerUp,
+            factSkill: details.factSkill,
+            isTimed: details.timed,
+            hasStudyGuide: details.studyGuideIncluded
+          };
+        }
+
+        const newRef = doc(collection(db, COLLECTION_NAME));
+        batch.set(newRef, {
+          userId,
+          weekId,
+          rowId,
+          subject: row.subject,
+          title: assignmentTitle,
+          courseId: targetCourseId,
+          type: 'Assignment',
+          dueDate: serverTimestamp(),
+          status: 'Pending',
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+          ...mathData
+        });
+        writesQueued++;
+
+        // Batch limit is 500
+        if (writesQueued >= 450) {
+          await batch.commit();
+          writesQueued = 0;
+        }
+      }
+      
+      if (writesQueued > 0) {
+        await batch.commit();
+        console.log(`Successfully batched ${writesQueued} assignments.`);
       }
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, COLLECTION_NAME);

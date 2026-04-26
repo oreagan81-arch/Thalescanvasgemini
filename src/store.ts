@@ -7,8 +7,10 @@ import { PacingWeek } from './services/service.pacingImport';
 
 interface UISlice {
   sidebarOpen: boolean;
+  theme: 'light' | 'dark' | 'zinc';
   heartbeatLogs: string[];
   toggleSidebar: () => void;
+  setTheme: (theme: 'light' | 'dark' | 'zinc') => void;
   addLog: (msg: string) => void;
   clearLogs: () => void;
 }
@@ -59,8 +61,10 @@ export const useStore = create<ThalesState>()(
     (set) => ({
       // UI Slice
       sidebarOpen: true,
+      theme: 'dark',
       heartbeatLogs: ["[SYSTEM] Thales OS v4.0 initialized.", "[HEARTBEAT] Determinism Engine Stable."],
       toggleSidebar: () => set((state) => ({ sidebarOpen: !state.sidebarOpen })),
+      setTheme: (theme) => set({ theme }),
       addLog: (msg: string) => set((state) => ({ 
         heartbeatLogs: [...state.heartbeatLogs.slice(-20), `[${new Date().toLocaleTimeString()}] ${msg}`] 
       })),
@@ -122,10 +126,10 @@ export const useStore = create<ThalesState>()(
     }),
     {
       name: 'thales-os-storage',
-      version: 5, 
+      version: 6, 
       storage: createJSONStorage(() => localStorage),
       migrate: (persistedState: any, version: number) => {
-        if (version < 5) return persistedState;
+        if (version < 6) return persistedState;
         return persistedState;
       },
       partialize: (state) => ({
@@ -135,6 +139,7 @@ export const useStore = create<ThalesState>()(
         favoriteTemplates: state.favoriteTemplates,
         lastUsedSubject: state.lastUsedSubject,
         sidebarOpen: state.sidebarOpen,
+        theme: state.theme,
         geminiApiKey: state.geminiApiKey,
         canvasApiToken: state.canvasApiToken,
         canvasCourseIds: state.canvasCourseIds, 
