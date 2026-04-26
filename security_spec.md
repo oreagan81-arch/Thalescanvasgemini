@@ -1,25 +1,91 @@
-# Security Specification: Thales Academic OS
+# Thales Canvas Gemini Security Specification
 
-## Data Invariants
-1. **Subject Authenticity**: A planner row must always belong to a valid Thales subject defined in `COURSE_IDS`.
-2. **Friday Restriction**: Assignments cannot be created for Friday (except Tests).
-3. **Identity Pinning**: User settings are strictly pinned to the document ID matching `request.auth.uid`.
+## 1. Data Invariants
+- **User Scoping**: Most data (Planner, Announcements, Assignments) belongs to a specific teacher and must be isolated by their Auth UID.
+- **Artifact Scoping**: To support potential multi-app or multi-instance deployments, data is scoped under `/artifacts/{appId}/`.
+- **Relational Integrity**: Assessments/Assignments must reference valid week IDs.
+- **Immutable Fields**: `userId`, `createdAt`, and `appId` references must be immutable once written.
+- **Identity Verification**: All writes require a signed-in user with a verified email.
 
-## The "Dirty Dozen" Payloads (Red Team Audit)
-1. **Unauthorized Setting Overwrite**: Attempting to update `settings/LITERAL_UID` from a different account.
-2. **Ghost Assignment Injection**: Creating an assignment for a week without a parent `Week` document.
-3. **PII Harvesting**: `get` request on `users/` collection by a non-admin.
-4. **Role Escalation**: Setting `role: 'admin'` during user profile creation.
-5. **ID Poisoning**: Injecting 1MB junk string as `plannerRowId`.
-6. **Relational Sync Bypass**: Updating `canvas_pages` without a corresponding `planner_rows` entry.
-7. **Friday Violation**: Force-pushing an assignment with `dueDate` on a Friday.
-8. **Impersonation**: Setting `teacherName` to "Headmaster" while authenticated as a different teacher.
-9. **Resource Scraping**: List query on `announcements` without a `where` clause on `ownerId`.
-10. **Shadow Field Injection**: Adding `isAuthorized: true` to a planner row payload.
-11. **Canvas Token Exfiltration**: Attempting to read `settings/{uid}` without being the owner.
-12. **Deployment Log Forgery**: Inserting a 'SUCCESS' log for a non-existent deployment task.
+## 2. The Dirty Dozen Payloads (Red Team Tests)
 
-## Test Runner (Logic checks)
-- Verify `isOwner()` helper blocks all cross-user accesses.
-- Verify `isValidId()` blocks oversized path variables.
-- Verify `isValidPlannerRow()` enforces Thales subject list.
+### T1: Identity Spoofing (Planner)
+```json
+// Path: /artifacts/thales-v1/users/attacker_uid/planner_rows/doc_1
+{
+  "userId": "victim_uid",
+  "weekId": "week-1",
+  ...
+}
+```
+*Expected*: PERMISSION_DENIED (UID mismatch).
+
+### T2: Phantom Artifact Access
+```json
+// Path: /artifacts/other_school_id/users/my_uid/settings/profile
+{ "teacherName": "Attacker" }
+```
+*Expected*: PERMISSION_DENIED (if we implement strict appId validation, though usually, we allow users to their own UID across artifacts if it's the same project).
+
+### T3: Global Data Scraping (Public)
+```json
+// Request: LIST /artifacts/thales-v1/public/data
+```
+*Expected*: PERMISSION_DENIED (Must require at least auth, and potentially specific query filters).
+
+### T4: Schema Poisoning (1MB String)
+```json
+{ "lessonTitle": "A".repeat(1000000) }
+```
+*Expected*: PERMISSION_DENIED (Size limits).
+
+### T5: State Shortcut (Assignment)
+```json
+{ "status": "Deployed" } // When creating
+```
+*Expected*: PERMISSION_DENIED (If creation must start as 'Pending').
+
+### T6: Invalid ID Poisoning
+```json
+// Path: /artifacts/thales-v1/users/my_uid/planner_rows/!!!INVALID!!!
+```
+*Expected*: PERMISSION_DENIED (isValidId fails).
+
+### T7: PII Leakage (Settings)
+```json
+// Request: GET /artifacts/thales-v1/settings/victim_uid
+```
+*Expected*: PERMISSION_DENIED (Not owner).
+
+### T8: Admin Privilege Escalation
+```json
+{ "role": "admin" } // On self-profile update
+```
+*Expected*: PERMISSION_DENIED (Role is immutable/system-only).
+
+### T9: Cross-User Week Modification
+```json
+// Request: UPDATE /weeks/week-1
+```
+*Expected*: PERMISSION_DENIED (Requires admin email).
+
+### T10: Orphaned Resource (Missing Week)
+```json
+{ "weekId": "non-existent-week" }
+```
+*Expected*: PERMISSION_DENIED (Via exists() check).
+
+### T11: Timestamp Forgery
+```json
+{ "updatedAt": "2000-01-01T00:00:00Z" }
+```
+*Expected*: PERMISSION_DENIED (Must match request.time).
+
+### T12: Key Injection
+```json
+{ "ghostField": true }
+```
+*Expected*: PERMISSION_DENIED (hasOnly / keys().size() failure).
+
+## 3. Test Runner (Draft)
+A `firestore.rules.test.ts` will focus on these 12 vectors.

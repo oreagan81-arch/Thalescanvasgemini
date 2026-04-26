@@ -17,7 +17,7 @@ import {
   PenTool
 } from 'lucide-react'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { settingsService, UserSettings } from '../services/settingsService'
+import { settingsService, UserSettings } from '../services/service.settings'
 import { COURSE_IDS } from '../constants'
 import { toast } from 'sonner'
 import { getAuth } from 'firebase/auth'

@@ -15,9 +15,9 @@ import {
   ClipboardList,
   Sparkles
 } from 'lucide-react'
-import { assignmentService, Assignment } from '../services/assignmentService'
-import { plannerService } from '../services/plannerService'
-import { calendarService } from '../services/calendarService'
+import { assignmentService, Assignment } from '../services/service.assignment'
+import { plannerService } from '../services/service.planner'
+import { calendarService } from '../services/service.calendar'
 import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
 

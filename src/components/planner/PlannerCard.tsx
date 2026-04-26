@@ -3,7 +3,7 @@ import { Card, CardHeader, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Wand2, FileSearch } from 'lucide-react';
-import { PlannerRow } from '../../services/plannerService';
+import { PlannerRow } from '../../services/service.planner';
 
 interface PlannerCardProps {
   row: PlannerRow;
@@ -13,7 +13,7 @@ interface PlannerCardProps {
 const SUBJECTS = ['Math', 'Reading', 'Spelling', 'Language Arts', 'Science', 'History'];
 const TYPES = ['Lesson', 'Test', 'Quiz', 'Project', 'Review', 'CP'];
 
-export const PlannerCard: React.FC<PlannerCardProps> = ({ row, onUpdate }) => {
+export const PlannerCard: React.FC<PlannerCardProps> = React.memo(({ row, onUpdate }) => {
   const [localTitle, setLocalTitle] = useState(row.lessonTitle);
   const [localNum, setLocalNum] = useState(row.lessonNum);
 
@@ -98,4 +98,4 @@ export const PlannerCard: React.FC<PlannerCardProps> = ({ row, onUpdate }) => {
       </CardContent>
     </Card>
   );
-}
+});

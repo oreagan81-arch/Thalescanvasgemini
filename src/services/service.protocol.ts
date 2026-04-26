@@ -1,7 +1,6 @@
-import { GoogleGenAI, Type } from "@google/genai";
+import { geminiHelper } from "../lib/geminiHelper";
 import { THALES_PROTOCOL_INVARIANTS } from "../constants";
-
-const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+import { Type } from "@google/genai";
 
 export interface AuditReport {
   score: number;
@@ -46,17 +45,29 @@ export const protocolService = {
         Return a JSON audit report. Be thorough and critical.
       `;
 
-      const response = await ai.models.generateContent({
-        model: "gemini-3.1-pro-preview",
-        contents: `Audit this data: ${JSON.stringify(fileContents)}`,
-        config: {
-          systemInstruction: systemPrompt,
-          responseMimeType: "application/json"
+      const schemaProperties = {
+        score: { type: Type.NUMBER },
+        summary: { type: Type.STRING },
+        findings: {
+          type: Type.ARRAY,
+          items: {
+            type: Type.OBJECT,
+            properties: {
+              file: { type: Type.STRING },
+              issue: { type: Type.STRING },
+              severity: { type: Type.STRING, enum: ["high", "medium", "low"] },
+              suggestedFix: { type: Type.STRING }
+            },
+            required: ["file", "issue", "severity", "suggestedFix"]
+          }
         }
-      });
+      };
 
-      if (!response.text) throw new Error("Audit engine returned no data");
-      return JSON.parse(response.text.trim());
+      return await geminiHelper.generateStructuredJSON<AuditReport>(
+        `Audit this data: ${JSON.stringify(fileContents)}\n\n${systemPrompt}`,
+        schemaProperties,
+        ["score", "summary", "findings"]
+      );
     } catch (err) {
       console.error("Audit Engine Critical Failure:", err);
       throw err;

@@ -1,0 +1,11 @@
+{
+  "courseName": "4th Grade Math",
+  "templateId": "math-4-std",
+  "weeks": [
+    {
+      "weekNumber": 1,
+      "lessons": ["Lesson 1", "Lesson 2", "Lesson 3", "Lesson 4", "Practice Test 1"],
+      "defaultAttachments": ["Syllabus", "Class Rules"]
+    }
+  ]
+}

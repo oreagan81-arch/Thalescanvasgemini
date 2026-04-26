@@ -1,5 +1,5 @@
-import { githubService } from './githubService';
-import { plannerService, PlannerRow } from './plannerService';
+import { githubService } from './service.github';
+import { plannerService, PlannerRow } from './service.planner';
 import { 
   collection, 
   query, 

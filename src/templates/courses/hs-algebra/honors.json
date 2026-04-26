@@ -1,0 +1,11 @@
+{
+  "courseName": "Honors Algebra II",
+  "templateId": "hs-algebra-honors",
+  "weeks": [
+    {
+      "weekNumber": 1,
+      "lessons": ["Review of Linear Functions", "Systems of Equations & Inequalities", "Matrix Operations", "Quadratic Functions & Factoring", "Chapter 1 Unit Test"],
+      "defaultAttachments": ["Equation reference sheet", "Graphing calculator guide"]
+    }
+  ]
+}

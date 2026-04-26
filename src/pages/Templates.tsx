@@ -11,7 +11,7 @@ import {
   Loader2,
   FileText
 } from 'lucide-react'
-import { templateService, Template } from '../services/templateService'
+import { templateService, Template } from '../services/service.template'
 import { getAuth } from 'firebase/auth'
 import { toast } from 'sonner'
 import { useNavigate } from 'react-router-dom'

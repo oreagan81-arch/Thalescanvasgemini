@@ -15,10 +15,11 @@ import {
   RefreshCcw,
   Eraser
 } from 'lucide-react'
-import { canvasPageService, CanvasPage } from '../services/canvasPageService'
-import { plannerService } from '../services/plannerService'
-import { assignmentService } from '../services/assignmentService'
-import { calendarService } from '../services/calendarService'
+import { canvasPageService, CanvasPage } from '../services/service.canvasPage'
+import { plannerService } from '../services/service.planner'
+import { assignmentService } from '../services/service.assignment'
+import { calendarService } from '../services/service.calendar'
+import { useStore } from '../store'
 import { generateWeeklyAgenda } from '../lib/geminiHelper'
 import { COURSE_IDS } from '../constants'
 import { toast } from 'sonner'
@@ -26,8 +27,8 @@ import { cn } from '@/lib/utils'
 import { useSafeHTML } from '../lib/security'
 
 export function CanvasPages() {
-  const currentContext = calendarService.getAcademicContext();
-  const [week, setWeek] = useState(calendarService.getWeekId(currentContext));
+  const week = useStore((state) => state.selectedWeek);
+  const setWeek = useStore((state) => state.setWeek);
   const [page, setPage] = useState<CanvasPage | null>(null);
   const [loading, setLoading] = useState(false);
   const [syncing, setSyncing] = useState(true);
@@ -63,7 +64,8 @@ export function CanvasPages() {
         toast.success('Weekly Agenda Generated');
       }
     } catch (err) {
-      toast.error('Generation failed');
+      console.error("Canvas Agenda Generation Error:", err);
+      toast.error('Neural Engine Error: Failed to generate Canvas HTML. Ensure your curriculum nodes are valid.');
     } finally {
       setLoading(false);
     }

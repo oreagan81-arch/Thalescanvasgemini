@@ -1,0 +1,166 @@
+// ============================================================================
+// THE THALES INTELLIGENCE ENGINE
+// Deterministic rules for Math, Reading, Spelling, and ELA.
+// Note: ELA (Shurley English) operates on a completely separate curriculum 
+// architecture and does NOT use the Reading/Spelling rules.
+// ============================================================================
+
+// --- MATH CURRICULUM MAPPINGS ---
+export const FACT_TEST_MAP: Record<number, string> = {
+  1: "Addition facts starting with 5+5, 2+9",
+  2: "Addition facts starting with 5+5, 2+9",
+  3: "Subtraction facts starting with 9-8, 8-5",
+  4: "Multiplication facts starting with 9x6, 7x1",
+  5: "Addition facts starting with 5+5, 2+9",
+  6: "Subtraction facts starting with 9-8, 8-5",
+  7: "Subtraction facts starting with 9-8, 8-5",
+  8: "Multiplication facts starting with 9x6, 7x1",
+  9: "Division facts starting with 49÷7, 25÷5",
+  10: "Multiplication facts starting with 9x6, 7x1",
+  11: "Division facts starting with 49÷7, 25÷5",
+  12: "Division facts starting with 81÷9, 48÷8",
+  13: "Division facts starting with 81÷9, 48÷8",
+  14: "Multiplication facts starting with 7x9, 4x4",
+  15: "Multiplication facts starting with 7x9, 4x4",
+  16: "Multiplication facts starting with 7x9, 4x4",
+  17: "Improper fractions starting with 8/3, 12/4",
+  18: "Division with remainders starting with 7÷2, 16÷3",
+  19: "Improper fractions starting with 8/3, 12/4",
+  20: "Reducing fractions to lowest terms starting with 2/10, 3/9",
+  21: "Improper fractions starting with 8/3, 12/4",
+  22: "Simplifying fractions starting with 6/4, 10/8",
+  23: "Reducing fractions to lowest terms starting with 2/10, 3/9"
+};
+
+export const POWER_UP_MAP: Record<number, string> = {
+  1: "A", 2: "A", 3: "B", 4: "C", 5: "A", 6: "B", 7: "B", 8: "C", 9: "D", 10: "C",
+  11: "D", 12: "E", 13: "E", 14: "F", 15: "F", 16: "F", 17: "H", 18: "G", 19: "H",
+  20: "I", 21: "H", 22: "J", 23: "I"
+};
+
+export interface ParsedMathTest {
+  testNumber: number;
+  powerUp: string;
+  factSkill: string;
+  timed: boolean;
+  studyGuideIncluded: boolean;
+  powerUpUrl: string;
+}
+
+export function parseMathTest(testNumber: number): ParsedMathTest {
+  const powerUp = POWER_UP_MAP[testNumber] || "Unknown Power Up";
+  return {
+    testNumber,
+    powerUp,
+    factSkill: FACT_TEST_MAP[testNumber] || "Standard Fact Practice",
+    timed: true,
+    studyGuideIncluded: true,
+    powerUpUrl: `https://thalesacademy.instructure.com/files/power-up-${powerUp.toLowerCase()}-practice.pdf`,
+  };
+}
+
+export function extractMathTestNumber(command: string): number | null {
+  const match = command.match(/math\s*test\s*(\d+)/i);
+  return match ? parseInt(match[1], 10) : null;
+}
+
+// --- READING & SPELLING MAPPINGS ---
+// Explicitly distinct from ELA (Shurley English)
+
+export interface FluencyBenchmark {
+  wpm: number;
+  errorLimit: number;
+  label: string;
+}
+
+export function getReadingFluencyBenchmark(testNumber: number): FluencyBenchmark {
+  if (testNumber >= 1 && testNumber <= 7) {
+    return { wpm: 100, errorLimit: 2, label: "The goal of this fluency check is to read 100 words per minute with 2 or fewer errors." };
+  } else if (testNumber >= 8 && testNumber <= 10) {
+    return { wpm: 115, errorLimit: 2, label: "The goal of this fluency check is to read 115 words per minute with 2 or fewer errors." };
+  } else {
+    // Tests 11-13+
+    return { wpm: 130, errorLimit: 2, label: "The goal of this fluency check is to read 130 words per minute with 2 or fewer errors." };
+  }
+}
+
+export interface SpellingTestData {
+  lessonsCovered: string;
+  words: string[];
+}
+
+export const SPELLING_TEST_MAP: Record<number, SpellingTestData> = {
+  1: { lessonsCovered: "1-5", words: ["write", "right", "happy", "review", "straightest", "building", "misquote", "view", "sleepless", "research", "study", "cheapest", "equal", "wander", "unhappy", "source", "unequal", "childless", "listening", "sign", "cloudless", "lightest", "stretch", "rebuild", "people"] },
+  2: { lessonsCovered: "1-10", words: ["feat", "feet", "fight", "darkness", "searching", "spelling", "remarkable", "useless", "stretching", "sleeping", "unbreakable", "answer", "careless", "style", "quote", "uneven", "picture", "stretched", "resource", "author", "largest", "please", "quietness", "question", "lovable"] },
+  3: { lessonsCovered: "1-15", words: ["clothes", "close", "package", "delightful", "biggest", "soreness", "helpful", "choice", "person", "sailboat", "unlikely", "school", "choking", "final", "thoughtful", "sketch", "mistake", "fitness", "lightly", "different", "running", "stopped", "quietly", "wreck", "hopelessly"] },
+  4: { lessonsCovered: "1-20", words: ["hole", "whole", "together", "cloudy", "reserve", "strength", "carry", "grabbed", "length", "presented", "childish", "caught", "rainy", "fancy", "valuable", "speaker", "quietest", "misspell", "shopper", "selfish", "sunny", "listened", "normal", "search", "straighten"] },
+  5: { lessonsCovered: "1-25", words: ["right", "write", "uneven", "skating", "shopping", "biggest", "purely", "helplessness", "copying", "different", "playful", "carefully", "equally", "graceful", "mighty", "fudge", "noisy", "wonderfully", "really", "designer", "frosty", "stylish", "related", "teacher", "safely"] },
+  6: { lessonsCovered: "1-30", words: ["Vary", "Very", "Foolish", "Friendliness", "Nights", "Conform", "Happiness", "Shiny", "Carried", "Easy", "Lunches", "Studied", "Disease", "Informal", "Reporter", "Strength", "Fanciest", "Classes", "Scratch", "Schools", "Drying", "Finally", "Sleepy", "Delighted", "Sadness"] },
+  7: { lessonsCovered: "1-35", words: ["Through", "Lone", "Stepping", "Deserve", "Worrying", "Boxes", "Defining", "Normally", "Constrict", "Signs", "Copied", "Inside", "Resign", "Changing", "Planned", "Confine", "Lately", "Tried", "Happiest", "Pitiful", "Children", "Varied", "Lucky", "Wrapper", "Maddest"] },
+  8: { lessonsCovered: "1-40", words: ["Whose", "Loan", "Misplaced", "Foolishly", "Blow", "Tricky", "Breakable", "Incurable", "Remain", "Claim", "Leave", "Conserve", "Throw", "Patches", "Pointless", "Studied", "Design", "Forcefully", "Harmlessly", "Lonely", "Stylish", "Sturdiest", "Safely", "Voltage", "Starring"] },
+  9: { lessonsCovered: "1-45", words: ["Whether", "Weather", "Studying", "Confusing", "Loneliest", "Foxes", "Dosage", "Slammed", "Clapping", "Fluid", "Played", "Stitches", "Removal", "Contest", "Retract", "Leader", "Pitied", "Flatten", "Undefeated", "Contract", "Spray", "Flying", "Text", "Happily", "Stylishly"] },
+  10: { lessonsCovered: "1-50", words: ["Plain", "Write", "Pause", "Darkness", "Refine", "Cause", "Invaluable", "Bloomed", "Easily", "Cloudiness", "Relate", "Placement", "Yellow", "Scratches", "Earliest", "Watches", "Payment", "Strangely", "Department", "Poison", "Planner", "Flowers", "Toughest", "Lengthening", "Unlucky"] },
+  11: { lessonsCovered: "1-55", words: ["Sale", "Right", "Safest", "Basement", "Sturdiest", "Barred", "Misplaced", "Luckily", "Refreshment", "Confirmed", "Earlier", "Strangeness", "Sources", "Cloudiest", "Unlucky", "Unmistakable", "Forceful", "Questionable", "Gain", "Contracted", "Resigned", "Investment", "Reacting", "Signal", "Stained"] },
+  12: { lessonsCovered: "1-60", words: ["Sale", "Sail", "Heavy", "Refinement", "Trial", "Breathe", "Cause", "Speediest", "Aren't", "Joyful", "Touched", "Wrapping", "Didn't", "Personally", "Flier", "Carrier", "Load", "Removing", "Unsnapped", "Misprinted", "Shipment", "Drainage", "Stranger", "Wonderful", "Reacting"] },
+  13: { lessonsCovered: "1-65", words: ["Their", "They're", "Worrying", "Cried", "Sadder", "Hasn't", "Express", "Unrelated", "Stain", "Friendliest", "Reserving", "Toughest", "Denying", "Loneliest", "Business", "Helplessly", "Confirmed", "What's", "Exchange", "Scratched", "Tricky", "Let's", "Foolishly", "Worrier", "Strengthening"] },
+  14: { lessonsCovered: "1-70", words: ["Weather", "Here", "Town", "Doesn't", "Noisiness", "Painter", "Brown", "Choicest", "Heaviest", "Luckily", "Explained", "Il", "Recently", "Relate", "Exported", "Shouldn't", "Regained", "Children", "Loudly", "Patches", "Hottest", "Foxes", "Quick", "Soundness", "Proud"] },
+  15: { lessonsCovered: "1-75", words: ["Right", "Vary", "Athlete", "Everyone", "Stranger", "Wondered", "Listening", "Sudden", "Preserve", "Confronted", "Statement", "Request", "Express", "Let's", "Studying", "Delighted", "Delightful", "Replacement", "Hurried", "Danger", "Straight", "Finished", "Several", "Racing", "Beauty"] },
+  16: { lessonsCovered: "1-80", words: ["Piece", "Peace", "Type", "Before", "Gripping", "Counting", "House", "That's", "Nightly", "Exclaim", "Suddenly", "Ground", "Restricted", "Quiz", "Peaceful", "Loneliest", "Chief", "Il", "Largely", "Aren't", "First", "Haven't", "Roughest", "Breathe", "Beautiful"] },
+  17: { lessonsCovered: "1-85", words: ["They're", "Very", "Second", "Exciting", "Govern", "Prolong", "Grief", "Surprise", "Reason", "Trapped", "Misspell", "Briefly", "Sturdiest", "Active", "Likeliness", "Stories", "Unplanned", "Relative", "Explain", "Carries", "Greatest", "Proclaim", "Thief", "Babies", "Worries"] },
+  18: { lessonsCovered: "1-90", words: ["Threw", "Through", "Department", "Expressive", "Action", "Personal", "Hotter", "Repression", "Winners", "Inactive", "Thoughts", "Hasn't", "Nastily", "Cities", "Babyish", "Reasonable", "Station", "Painter", "Actively", "They'd", "Rewrap", "Reaction", "Blackness", "Export", "Heaviest"] },
+  19: { lessonsCovered: "1-95", words: ["Feat", "Their", "Thoughtless", "Worthy", "Slipping", "Refine", "Stepped", "Flattest", "Famous", "Benches", "Globe", "Movement", "Replace", "Wouldn't", "Fashion", "Strengthen", "Various", "Loudly", "Powerful", "Beautiful", "Expression", "Misspelling", "Relation", "Breath", "Dangerous"] },
+  20: { lessonsCovered: "1-100", words: ["Piece", "Here", "Scribe", "Dripping", "Worthiness", "Exercised", "Nineteen", "Provision", "Athletes", "Glorious", "Resolve", "Refine", "Joyfully", "Fashionable", "Quickest", "Poisonous", "Carriage", "Tension", "Morning", "Tricky", "Contraction", "Throughout", "Roominess", "Foolishly", "Tripped"] },
+  21: { lessonsCovered: "1-105", words: ["Their", "Peace", "Furious", "Listen", "Nervous", "Hurries", "Proportion", "Different", "Snapping", "Interested", "Photograph", "Government", "Crease", "Thirst", "Script", "Brief", "Settle", "Agree", "Strict", "Children", "Creative", "Relatively", "Tense", "Delightful", "Spirit"] },
+  22: { lessonsCovered: "1-110", words: ["Clothes", "Weather", "Protect", "Instead", "Stretch", "Rejection", "Pressure", "Detective", "Scripts", "Author", "Edgy", "Progression", "Healthy", "Concept", "Conquest", "Anybody", "Feature", "Rather", "Seize", "Station", "Receptive", "Except", "Treatment", "Texture", "Chiefly"] },
+  23: { lessonsCovered: "1-115", words: ["Right", "Whose", "Logic", "Passion", "Snapped", "Retain", "Exception", "Maintain", "Physical", "Deceptive", "Featuring", "Science", "Development", "Pleasure", "Relatively", "Detain", "Preserve", "Scripture", "Projecting", "Fashionable", "Contain", "Protective", "Deception", "Union", "Tension"] },
+  24: { lessonsCovered: "1-120", words: ["Their", "Feet", "Where", "Together", "Friendly", "Straight", "Shopper", "Valuable", "Different", "Enough", "Sport", "Helpless", "Shaping", "Strengthening", "Sign", "Teach", "School", "Greatest", "Really", "Misspell", "Refreshing", "Light", "Should", "Planned", "Undefeated"] }
+};
+
+export const CHECKOUT_PAGE_MAP: Record<number, string> = {
+  10: "Page 45 - 'The Discovery'",
+  11: "Page 52 - 'A New Friend'",
+};
+
+export interface ParsedReadingWeek {
+  weekNumber: number;
+  spellingLessonsCovered: string;
+  spellingWords: string[];
+  fluencyBenchmark: FluencyBenchmark;
+  checkoutPage: string;
+}
+
+export function parseReadingWeek(weekNumber: number, checkoutTestNumber: number = weekNumber): ParsedReadingWeek {
+  const spellingData = SPELLING_TEST_MAP[weekNumber];
+  return {
+    weekNumber,
+    spellingLessonsCovered: spellingData ? spellingData.lessonsCovered : "N/A",
+    spellingWords: spellingData ? spellingData.words : ["Review words from previous week"],
+    fluencyBenchmark: getReadingFluencyBenchmark(checkoutTestNumber),
+    checkoutPage: CHECKOUT_PAGE_MAP[weekNumber] || "Standard Checkout",
+  };
+}
+
+export function extractReadingWeekNumber(command: string): number | null {
+  const match = command.match(/reading\s*week\s*(\d+)/i);
+  return match ? parseInt(match[1], 10) : null;
+}
+
+// --- ELA (SHURLEY ENGLISH) MAPPINGS ---
+// Placeholder section for Shurley English rules.
+// Rules here will dictate sentence flow, grammar checks, and ELA testing metrics,
+// entirely bypassing the Reading/Spelling maps above.
+
+export interface ParsedELATest {
+  chapter: number;
+  grammarFocus: string;
+  vocabularyWords: string[];
+}
+
+export function parseELATest(chapterNumber: number): ParsedELATest {
+  // Stub implementation for future Shurley English logic
+  return {
+    chapter: chapterNumber,
+    grammarFocus: "Subject/Verb Agreement", 
+    vocabularyWords: []
+  };
+}

@@ -13,7 +13,7 @@ import {
   ExternalLink,
   ChevronRight
 } from 'lucide-react'
-import { resourceService, ResourceFile } from '../services/resourceService'
+import { resourceService, ResourceFile } from '../services/service.resource'
 import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
 

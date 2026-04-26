@@ -24,6 +24,9 @@ import { Announcements } from './pages/Announcements';
 import { Resources } from './pages/Resources';
 import { Settings } from './pages/Settings';
 import { Templates } from './pages/Templates';
+import { SyllabusMapper } from './components/planner/SyllabusMapper';
+import AnnouncementCommandCenter from './pages/AnnouncementCommandCenter';
+import { useStore } from './store';
 
 import React, { Suspense } from 'react';
 
@@ -67,6 +70,8 @@ const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
 };
 
 export default function App() {
+  const selectedWeek = useStore(state => state.selectedWeek);
+
   return (
     <QueryClientProvider client={queryClient}>
       <AuthProvider>
@@ -82,9 +87,11 @@ export default function App() {
               }>
                 <Route index element={<Dashboard />} />
                 <Route path="planner" element={<Planner />} />
+                <Route path="syllabus-mapper" element={<SyllabusMapper weekId={selectedWeek} />} />
                 <Route path="canvas-pages" element={<CanvasPages />} />
                 <Route path="assignments" element={<Assignments />} />
                 <Route path="announcements" element={<Announcements />} />
+                <Route path="command-center" element={<AnnouncementCommandCenter />} />
                 <Route path="resources" element={<Resources />} />
                 <Route path="settings" element={<Settings />} />
                 <Route path="templates" element={<Templates />} />

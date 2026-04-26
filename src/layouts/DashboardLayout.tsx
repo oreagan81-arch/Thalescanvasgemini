@@ -17,21 +17,26 @@ import {
   ChevronRight,
   RefreshCw,
   AppWindow,
-  Activity
+  Activity,
+  Sparkles,
+  Wand2
 } from 'lucide-react';
-import { useUIStore } from '../store';
+import { useStore } from '../store';
 import { useAuth } from '../contexts/AuthContext';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
-import { githubService, GitHubRepo } from '../services/githubService';
-import { protocolService, AuditReport } from '../services/protocolService';
-import { syncService } from '../services/syncService';
+import { githubService, GitHubRepo } from '../services/service.github';
+import { protocolService, AuditReport } from '../services/service.protocol';
+import { syncService } from '../services/service.sync';
 import { toast } from 'sonner';
 
 export function DashboardLayout() {
   const { logOut } = useAuth();
-  const { sidebarOpen, heartbeatLogs, addLog } = useUIStore();
+  const sidebarOpen = useStore((state) => state.sidebarOpen);
+  const heartbeatLogs = useStore((state) => state.heartbeatLogs);
+  const addLog = useStore((state) => state.addLog);
+  
   const [gitToken, setGitToken] = useState<string | null>(localStorage.getItem('github_token'));
   const [repos, setRepos] = useState<GitHubRepo[]>([]);
   const [loadingRepos, setLoadingRepos] = useState(false);
@@ -130,8 +135,10 @@ export function DashboardLayout() {
     { icon: LayoutDashboard, label: 'Dashboard', to: '/' },
     { icon: Calendar, label: 'Planner', to: '/planner' },
     { icon: FileText, label: 'Canvas Pages', to: '/canvas-pages' },
+    { icon: Wand2, label: 'Syllabus Mapper', to: '/syllabus-mapper' },
     { icon: Send, label: 'Assignments', to: '/assignments' },
     { icon: Rss, label: 'Announcements', to: '/announcements' },
+    { icon: Sparkles, label: 'AI Command Center', to: '/command-center' },
     { icon: Layout, label: 'Blueprints', to: '/templates' },
     { icon: Layers, label: 'Resource Brain', to: '/resources' },
     { icon: Settings, label: 'Settings', to: '/settings' },

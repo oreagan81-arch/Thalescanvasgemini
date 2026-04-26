@@ -1,0 +1,11 @@
+{
+  "courseName": "Middle School World History",
+  "templateId": "ms-history-std",
+  "weeks": [
+    {
+      "weekNumber": 1,
+      "lessons": ["Introduction to Ancient Civilizations", "Mesopotamia: The Fertile Crescent", "Ancient Egypt: Pharaonic Rule", "The Indus Valley Civilization", "Review & Quiz"],
+      "defaultAttachments": ["World Map Artifact", "Timeline Worksheet"]
+    }
+  ]
+}

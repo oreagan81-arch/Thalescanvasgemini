@@ -9,11 +9,11 @@ import {
   History, 
   Zap
 } from 'lucide-react'
-import { useAnnouncements, useDraftAnnouncement } from '../hooks/useAnnouncements'
-import { calendarService } from '../services/calendarService'
-import { announcementService, Announcement } from '../services/announcementService'
-import { settingsService, UserSettings } from '../services/settingsService'
-import { templateService } from '../services/templateService'
+import { useAnnouncements, useDraftAnnouncement } from '../hooks/hook.useAnnouncementSync'
+import { calendarService } from '../services/service.calendar'
+import { announcementService, Announcement } from '../services/service.announcement'
+import { settingsService, UserSettings } from '../services/service.settings'
+import { templateService } from '../services/service.template'
 import { toast } from 'sonner'
 import { getAuth } from 'firebase/auth'
 import { useLocation } from 'react-router-dom'
@@ -62,6 +62,7 @@ export function Announcements() {
   const [lastCommand, setLastCommand] = useState('');
   const [settings, setSettings] = useState<UserSettings|null>(null);
   const [localContent, setLocalContent] = useState('');
+  const [localSubject, setLocalSubject] = useState('');
   const [allHistory, setAllHistory] = useState<Announcement[]>([]);
 
   const { announcements, isLoading, save, isSaving } = useAnnouncements(week);
@@ -92,8 +93,10 @@ export function Announcements() {
   useEffect(() => {
     if (announcements && announcements.length > 0) {
       setLocalContent(announcements[0].content);
+      setLocalSubject(announcements[0].subject || '');
     } else {
       setLocalContent('');
+      setLocalSubject('');
     }
   }, [announcements]);
 
@@ -101,16 +104,22 @@ export function Announcements() {
     if (!settings) return;
     const finalCmd = cmd || command;
     setLastCommand(finalCmd);
-    const content = await draft(week, settings, finalCmd);
-    if (content) {
-      setLocalContent(content);
+    const result = await draft(week, settings, finalCmd);
+    if (result) {
+      if (typeof result === 'object' && result.emailBody) {
+        setLocalContent(result.emailBody);
+        setLocalSubject(result.subject || '');
+      } else {
+        setLocalContent(result);
+      }
       toast.success(finalCmd ? 'Intelligence Logic Applied' : 'Weekly Briefing Drafted');
       setCommand('');
     }
   };
 
   const handleCopy = () => {
-    navigator.clipboard.writeText(localContent);
+    const fullText = localSubject ? `Subject: ${localSubject}\n\n${localContent}` : localContent;
+    navigator.clipboard.writeText(fullText);
     toast.success("Copied to clipboard");
   };
 
@@ -126,6 +135,10 @@ export function Announcements() {
     } catch (err) {
       toast.error("Failed to save blueprint");
     }
+  };
+
+  const handlePost = () => {
+    save({ content: localContent, subject: localSubject });
   };
 
   return (
@@ -155,7 +168,7 @@ export function Announcements() {
             Auto-Briefing
           </Button>
           <Button 
-            onClick={() => save(localContent)} 
+            onClick={handlePost} 
             disabled={isSaving || isLoading} 
             className="bg-gradient-to-r from-amber-600 to-amber-400 hover:from-amber-500 hover:to-amber-300 text-black font-bold h-10 px-8 shadow-xl shadow-amber-500/20 border-none transition-all hover:scale-[1.02] active:scale-[0.98]"
           >
@@ -178,6 +191,8 @@ export function Announcements() {
           <PreviewCard 
             content={localContent}
             setContent={setLocalContent}
+            subject={localSubject}
+            setSubject={setLocalSubject}
             loading={isDrafting}
             onCopy={handleCopy}
             onRetry={() => handleAiDraft(command || 'Regenerate')}

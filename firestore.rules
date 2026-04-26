@@ -11,22 +11,22 @@ service cloud.firestore {
     }
 
     // =========================================================
-    // 1. GLOBAL HELPERS
+    // 1. GLOBAL HELPERS (Eight Pillars)
     // =========================================================
     function isSignedIn() {
       return request.auth != null;
     }
 
-    function isEmailVerified() {
-      return request.auth.token.email_verified == true;
+    function isVerified() {
+      return isSignedIn() && request.auth.token.email_verified == true;
     }
 
     function isOwner(userId) {
-      return isSignedIn() && request.auth.uid == userId;
+      return isVerified() && request.auth.uid == userId;
     }
 
     function isAdmin() {
-      return isSignedIn() && (
+      return isVerified() && (
         request.auth.token.email == "OReagan81@gmail.com" || 
         request.auth.token.email == "owen.reagan@thalesacademy.org"
       );
@@ -34,81 +34,93 @@ service cloud.firestore {
 
     function incoming() { return request.resource.data; }
     function existing() { return resource.data; }
-
-    function isValidId(id) {
-      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    
+    function isValidId(id) { 
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$'); 
     }
 
     // =========================================================
     // 2. VALIDATION BLUEPRINTS
     // =========================================================
     
-    function isValidSetting(data) {
-      return data.keys().hasAll(['updatedAt']) &&
-             (data.get('teacherName', '') is string) &&
-             (data.get('signature', '') is string) &&
-             (data.get('tone', '') is string);
-    }
-
     function isValidPlannerRow(data) {
-      return data.weekId is string && 
+      return data.keys().hasAll(['userId', 'weekId', 'day', 'subject', 'lessonTitle', 'deployStatus']) &&
+             data.userId == request.auth.uid &&
+             data.weekId is string && data.weekId.size() <= 50 &&
              data.day in ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'] &&
+             data.subject is string && data.subject.size() <= 64 &&
+             data.lessonTitle is string && data.lessonTitle.size() <= 1024 &&
              data.deployStatus in ['Draft', 'Ready', 'Deployed', 'Failed'];
     }
 
-    // =========================================================
-    // 3. COLLECTION MATCH BLOCKS
-    // =========================================================
+    function isValidAnnouncement(data) {
+      return data.keys().hasAll(['userId', 'weekId', 'content', 'status']) &&
+             data.userId == request.auth.uid &&
+             data.content is string && data.content.size() <= 65536 &&
+             data.status in ['Draft', 'Posted'];
+    }
 
-    // SETTINGS: Pinned to User Identity
+    // =========================================================
+    // 3. ARTIFACT SCOPED ACCESS (The User's Requested Pattern)
+    // =========================================================
+    
+    match /artifacts/{appId} {
+      // Ensure the appId is a valid slug
+      allow read: if isVerified();
+
+      // PRIVATE USER DATA: /artifacts/{appId}/users/{userId}/...
+      match /users/{userId}/{document=**} {
+        // Broad ownership check for nested data
+        allow read, write: if isOwner(userId);
+      }
+
+      // Specific enforcement for known collections inside user silos
+      match /users/{userId}/planner_rows/{rowId} {
+        allow create: if isOwner(userId) && isValidId(rowId) && isValidPlannerRow(incoming());
+        allow update: if isOwner(userId) && isValidPlannerRow(incoming()) && 
+                        incoming().diff(existing()).affectedKeys().hasOnly(['lessonTitle', 'lessonNum', 'homework', 'notes', 'resources', 'deployStatus', 'updatedAt']);
+      }
+
+      match /users/{userId}/announcements/{annId} {
+        allow create: if isOwner(userId) && isValidId(annId) && isValidAnnouncement(incoming());
+      }
+      
+      match /users/{userId}/settings/profile {
+        allow read: if isOwner(userId);
+        allow write: if isOwner(userId) && incoming().userId == userId;
+      }
+
+      // PUBLIC DATA: Shared templates, read-only globally, write by Admin
+      match /public/data/{document=**} {
+        allow read: if isVerified();
+        allow write: if isAdmin(); 
+      }
+    }
+
+    // =========================================================
+    // 4. LEGACY / TOP-LEVEL COLLECTIONS (For backwards compatibility)
+    // =========================================================
+    
     match /settings/{userId} {
-      allow read: if isOwner(userId) || isAdmin();
-      allow create, update: if (isOwner(userId) || isAdmin()) && isValidSetting(incoming());
+      allow read, write: if isOwner(userId);
     }
 
-    // WEEKS: Shared Academic Context
-    match /weeks/{weekId} {
-      allow read: if isSignedIn();
-      allow write: if isAdmin();
-    }
-
-    // PLANNER ROWS: The Curriculum Engine
     match /planner_rows/{rowId} {
-      allow read: if isSignedIn();
-      allow create, update: if isAdmin() && isValidPlannerRow(incoming()) && isValidId(rowId);
-      allow delete: if isAdmin();
+      allow list: if isVerified() && resource.data.userId == request.auth.uid;
+      allow get: if isVerified() && resource.data.userId == request.auth.uid;
+      allow create: if isVerified() && isValidPlannerRow(incoming());
+      allow update: if isVerified() && resource.data.userId == request.auth.uid && isValidPlannerRow(incoming());
+      allow delete: if isVerified() && resource.data.userId == request.auth.uid;
     }
 
-    // ANNOUNCEMENTS: Communication Logic
     match /announcements/{annId} {
-      allow read: if isSignedIn();
-      allow create, update: if isAdmin() && incoming().content.size() < 50000;
-      allow delete: if isAdmin();
+      allow list: if isVerified() && resource.data.userId == request.auth.uid;
+      allow create: if isVerified() && isValidAnnouncement(incoming());
+      allow get, update, delete: if isVerified() && resource.data.userId == request.auth.uid;
     }
 
-    // CANVAS PAGES: Staging Layer
-    match /canvas_pages/{pageId} {
-      allow read: if isSignedIn();
-      allow create, update: if isAdmin() && incoming().status in ['Draft', 'Deployed'];
-      allow delete: if isAdmin();
-    }
-
-    // RESOURCES: Registry
-    match /resources/{resId} {
-      allow read: if isSignedIn();
-      allow write: if isAdmin();
-    }
-
-    // DEPLOY LOGS: Audit Trail
-    match /deployments/{logId} {
-      allow read: if isSignedIn();
-      allow create: if isSignedIn(); // Allow logging actions
-      allow update, delete: if isAdmin();
-    }
-
-    // USERS: Admin Controlled
-    match /users/{userId} {
-      allow read: if isOwner(userId) || isAdmin();
+    match /weeks/{weekId} {
+      allow read: if isVerified();
       allow write: if isAdmin();
     }
   }
