@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import { calendarService } from './services/service.calendar';
+import { PacingWeek } from './services/service.pacingImport';
 
 // --- Types ---
 
@@ -29,24 +30,26 @@ interface CommandSlice {
   clearHistory: () => void;
 }
 
-// Data slice for caching or global data state
 interface DataSlice {
-  lastSyncedAt: string | null; // Changed to string for serializability in persist
+  lastSyncedAt: string | null; 
+  plannerData: PacingWeek[] | null;
   setLastSynced: (date: Date) => void;
+  setPlannerData: (data: PacingWeek[] | null) => void;
 }
 
 interface SettingsSlice {
   geminiApiKey: string;
   canvasApiToken: string;
-  canvasCourseId: string;
+  canvasCourseIds: Record<string, string>; 
   schoolStartDate: string | null;
-  setSettings: (settings: Partial<Pick<SettingsSlice, 'geminiApiKey' | 'canvasApiToken' | 'canvasCourseId' | 'schoolStartDate'>>) => void;
+  pacingGuideUrl: string; 
+  setSettings: (settings: Partial<Pick<SettingsSlice, 'geminiApiKey' | 'canvasApiToken' | 'schoolStartDate' | 'pacingGuideUrl' | 'canvasCourseIds'>>) => void;
+  updateCourseId: (subject: string, newId: string) => void;
 }
 
 export type ThalesState = UISlice & AcademicSlice & DataSlice & CommandSlice & SettingsSlice;
 
 // --- Initial Constants ---
-
 const initialContext = calendarService.getAcademicContext();
 
 // --- Main Store ---
@@ -71,7 +74,9 @@ export const useStore = create<ThalesState>()(
 
       // Data Slice
       lastSyncedAt: null,
+      plannerData: null,
       setLastSynced: (date: Date) => set({ lastSyncedAt: date.toISOString() }),
+      setPlannerData: (data: PacingWeek[] | null) => set({ plannerData: data }),
 
       // Command Slice
       recentCommands: [],
@@ -89,23 +94,40 @@ export const useStore = create<ThalesState>()(
       // Settings Slice
       geminiApiKey: (typeof process !== 'undefined' && process.env.GEMINI_API_KEY) || '',
       canvasApiToken: (typeof process !== 'undefined' && process.env.CANVAS_API_TOKEN) || '',
-      canvasCourseId: import.meta.env.VITE_CANVAS_COURSE_ID || '',
+      
+      canvasCourseIds: {
+        'Homeroom': '22254',
+        'Math': '21957',
+        'Reading': '21919',
+        'Spelling': '21919', 
+        'Language Arts': '21944',
+        'ELA': '21944',      
+        'Science': '21970',
+        'History': '21934'
+      },
+
       schoolStartDate: null,
+      
+      // Hardcoded exact Master Pacing Guide URL
+      pacingGuideUrl: 'https://docs.google.com/spreadsheets/d/1RpMrcQqqrDl2Gaqo2LaGTDQWvrsYwBntbYOXlIrM7LA/edit?gid=287822418#gid=287822418',
+
       setSettings: (settings) => set((state) => ({ ...state, ...settings })),
+      
+      updateCourseId: (subject: string, newId: string) => set((state) => ({
+        canvasCourseIds: {
+          ...state.canvasCourseIds,
+          [subject]: newId
+        }
+      })),
     }),
     {
       name: 'thales-os-storage',
-      version: 2,
+      version: 5, 
       storage: createJSONStorage(() => localStorage),
       migrate: (persistedState: any, version: number) => {
-        if (version < 2) {
-          // Simple migration: just return the old state
-          // New fields will be initialized with defaults during hydration
-          return persistedState;
-        }
+        if (version < 5) return persistedState;
         return persistedState;
       },
-      // Optionally filter what to persist
       partialize: (state) => ({
         selectedWeek: state.selectedWeek,
         selectedQuarter: state.selectedQuarter,
@@ -115,13 +137,14 @@ export const useStore = create<ThalesState>()(
         sidebarOpen: state.sidebarOpen,
         geminiApiKey: state.geminiApiKey,
         canvasApiToken: state.canvasApiToken,
-        canvasCourseId: state.canvasCourseId,
+        canvasCourseIds: state.canvasCourseIds, 
         schoolStartDate: state.schoolStartDate,
+        pacingGuideUrl: state.pacingGuideUrl,
+        plannerData: state.plannerData,
       }),
     }
   )
 );
 
-// Backwards compatibility or specific export for UI if needed
 export const useUIStore = useStore;
 export const useThalesStore = useStore;

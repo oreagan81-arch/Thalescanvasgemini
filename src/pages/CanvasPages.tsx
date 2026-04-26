@@ -27,8 +27,7 @@ import { cn } from '@/lib/utils'
 import { useSafeHTML } from '../lib/security'
 
 export function CanvasPages() {
-  const week = useStore((state) => state.selectedWeek);
-  const setWeek = useStore((state) => state.setWeek);
+  const { selectedWeek: week, setWeek, canvasCourseIds } = useStore();
   const [page, setPage] = useState<CanvasPage | null>(null);
   const [loading, setLoading] = useState(false);
   const [syncing, setSyncing] = useState(true);
@@ -203,7 +202,7 @@ export function CanvasPages() {
                  </div>
                  <div className="flex flex-col gap-1">
                     <span className="text-[10px] text-slate-500 font-bold uppercase">Routing ID</span>
-                    <span className="text-xs text-amber-500 font-mono">{COURSE_IDS.Homeroom} (Homeroom)</span>
+                    <span className="text-xs text-amber-500 font-mono">{canvasCourseIds['Homeroom'] || COURSE_IDS.Homeroom} (Homeroom)</span>
                  </div>
                  {page?.canvasPageId && (
                    <div className="flex flex-col gap-1">

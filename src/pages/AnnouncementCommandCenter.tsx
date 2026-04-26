@@ -30,7 +30,8 @@ const SUGGESTIONS = [
 ];
 
 export default function AnnouncementCommandCenter() {
-  const { geminiApiKey, canvasApiToken, canvasCourseId, addRecentCommand } = useStore();
+  const { geminiApiKey, canvasApiToken, canvasCourseIds, addRecentCommand } = useStore();
+  const canvasCourseId = canvasCourseIds['Homeroom'];
   const [command, setCommand] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
   const [isPosting, setIsPosting] = useState(false);

@@ -18,12 +18,13 @@ import {
 import { assignmentService, Assignment } from '../services/service.assignment'
 import { plannerService } from '../services/service.planner'
 import { calendarService } from '../services/service.calendar'
+import { useStore } from '../store'
 import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
 
 export function Assignments() {
   const currentContext = calendarService.getAcademicContext();
-  const [week, setWeek] = useState(calendarService.getWeekId(currentContext));
+  const { selectedWeek: week, setWeek, canvasCourseIds } = useStore();
   const [assignments, setAssignments] = useState<Assignment[]>([]);
   const [loading, setLoading] = useState(false);
   const [syncing, setSyncing] = useState(true);
@@ -47,7 +48,7 @@ export function Assignments() {
         unsubscribe();
       });
 
-      await assignmentService.generateFromPlanner(week, plannerRows);
+      await assignmentService.generateFromPlanner(week, plannerRows, canvasCourseIds);
       toast.success('Assignment Drafts Created');
     } catch (err) {
       toast.error('Generation failed');

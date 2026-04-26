@@ -121,7 +121,7 @@ export const assignmentService = {
     }
   },
 
-  generateFromPlanner: async (weekId: string, plannerRows: any[]) => {
+  generateFromPlanner: async (weekId: string, plannerRows: any[], courseIdsMap?: Record<string, string>) => {
     const userId = auth.currentUser?.uid;
     if (!userId) throw new Error("Authentication required");
 
@@ -137,7 +137,12 @@ export const assignmentService = {
         const snap = await getDocs(q);
         
         if (snap.empty) {
-          const targetCourseId = (COURSE_IDS as any)[row.subject] || COURSE_IDS.Homeroom;
+          let targetCourseId = (COURSE_IDS as any)[row.subject] || COURSE_IDS.Homeroom;
+          if (courseIdsMap && courseIdsMap[row.subject]) {
+            targetCourseId = parseInt(courseIdsMap[row.subject]);
+          } else if (courseIdsMap && courseIdsMap['Homeroom']) {
+            targetCourseId = parseInt(courseIdsMap['Homeroom']);
+          }
           
           const testNum = extractMathTestNumber(row.lessonTitle);
           let assignmentTitle = `[${row.subject}] ${row.lessonTitle}`;

@@ -12,16 +12,25 @@ export function Settings() {
   
   const [geminiKey, setGeminiKey] = useState(store.geminiApiKey);
   const [canvasToken, setCanvasToken] = useState(store.canvasApiToken);
-  const [courseId, setCourseId] = useState(store.canvasCourseId);
+  const [pacingUrl, setPacingUrl] = useState(store.pacingGuideUrl);
   const [startDate, setStartDate] = useState(store.schoolStartDate || '');
+  
+  // Subject States mapped to canvasCourseIds
+  const [courseIds, setCourseIds] = useState(store.canvasCourseIds);
+
   const [isSyncing, setIsSyncing] = useState(false);
+
+  const handleIdChange = (subject: string, id: string) => {
+    setCourseIds(prev => ({ ...prev, [subject]: id }));
+  };
 
   const handleSave = () => {
     store.setSettings({
       geminiApiKey: geminiKey,
       canvasApiToken: canvasToken,
-      canvasCourseId: courseId,
-      schoolStartDate: startDate
+      pacingGuideUrl: pacingUrl,
+      schoolStartDate: startDate,
+      canvasCourseIds: courseIds
     });
     toast.success("Settings saved successfully!"); 
   };
@@ -35,7 +44,6 @@ export function Settings() {
     setIsSyncing(true);
     try {
       const breaks = await calendarSyncService.syncCalendar(geminiKey);
-      // In a real app, we'd save these to Firestore or the Store
       console.log("Synced Breaks:", breaks);
       toast.success(`Successfully synced ${breaks.length} academic events using AI!`);
     } catch (error: any) {
@@ -79,15 +87,6 @@ export function Settings() {
               className="bg-black/40 border-white/10 text-white"
             />
           </div>
-          <div className="space-y-2">
-            <label className="text-sm font-medium text-slate-300">Canvas Course ID</label>
-            <Input 
-              value={courseId} 
-              onChange={e => setCourseId(e.target.value)} 
-              placeholder="e.g., 123456" 
-              className="bg-black/40 border-white/10 text-white"
-            />
-          </div>
         </CardContent>
       </Card>
 
@@ -96,9 +95,18 @@ export function Settings() {
           <CardTitle className="flex items-center gap-2 text-white">
             <Calendar className="w-5 h-5 text-blue-500" /> Pacing Engine Setup
           </CardTitle>
-          <CardDescription className="text-slate-400">Set the first day of school so the AI knows what week it is.</CardDescription>
+          <CardDescription className="text-slate-400">Set the first day of school and link your central pacing resources.</CardDescription>
         </CardHeader>
-        <CardContent className="p-6">
+        <CardContent className="p-6 space-y-4">
+          <div className="space-y-2">
+            <label className="text-sm font-medium text-slate-300">Pacing Guide Google Sheet URL</label>
+            <Input 
+              value={pacingUrl} 
+              onChange={e => setPacingUrl(e.target.value)} 
+              placeholder="https://docs.google.com/spreadsheets/d/..." 
+              className="bg-black/40 border-white/10 text-white"
+            />
+          </div>
           <div className="space-y-2">
             <label className="text-sm font-medium text-slate-300">First Day of School</label>
             <Input 
@@ -107,6 +115,36 @@ export function Settings() {
               onChange={e => setStartDate(e.target.value)} 
               className="bg-black/40 border-white/10 text-white"
             />
+          </div>
+
+          <div className="pt-4 space-y-3">
+            <h3 className="text-sm font-bold text-slate-400 uppercase tracking-wider">Subject-Specific Course IDs</h3>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="space-y-1">
+                <label className="text-xs font-medium text-slate-400">Homeroom ID</label>
+                <Input value={courseIds['Homeroom'] || ''} onChange={e => handleIdChange('Homeroom', e.target.value)} className="bg-black/20 border-white/5 h-9" />
+              </div>
+              <div className="space-y-1">
+                <label className="text-xs font-medium text-slate-400">Math ID</label>
+                <Input value={courseIds['Math'] || ''} onChange={e => handleIdChange('Math', e.target.value)} className="bg-black/20 border-white/5 h-9" />
+              </div>
+              <div className="space-y-1">
+                <label className="text-xs font-medium text-slate-400">Reading ID</label>
+                <Input value={courseIds['Reading'] || ''} onChange={e => handleIdChange('Reading', e.target.value)} className="bg-black/20 border-white/5 h-9" />
+              </div>
+              <div className="space-y-1">
+                <label className="text-xs font-medium text-slate-400">ELA ID</label>
+                <Input value={courseIds['ELA'] || ''} onChange={e => handleIdChange('ELA', e.target.value)} className="bg-black/20 border-white/5 h-9" />
+              </div>
+              <div className="space-y-1">
+                <label className="text-xs font-medium text-slate-400">History ID</label>
+                <Input value={courseIds['History'] || ''} onChange={e => handleIdChange('History', e.target.value)} className="bg-black/20 border-white/5 h-9" />
+              </div>
+              <div className="space-y-1">
+                <label className="text-xs font-medium text-slate-400">Science ID</label>
+                <Input value={courseIds['Science'] || ''} onChange={e => handleIdChange('Science', e.target.value)} className="bg-black/20 border-white/5 h-9" />
+              </div>
+            </div>
           </div>
         </CardContent>
         <CardFooter className="bg-black/20 flex justify-between p-4 border-t border-white/5">

@@ -4,7 +4,7 @@ export interface PacingWeek {
   weekNumber: number;
   dates: string;
   mathLesson: string;
-  readingWeek: number | string;
+  readingWeek: string; 
   spellingFocus: string;
   historyScience: string;
   elaChapter: string;
@@ -12,18 +12,10 @@ export interface PacingWeek {
 }
 
 export const pacingImportService = {
-  /**
-   * Clean wrapper for the mapper UI.
-   * Delegates to the internal parsing logic.
-   */
   parse: async (rawText: string, apiKey: string): Promise<PacingWeek[]> => {
     return pacingImportService.parseGoogleSheetText(rawText, apiKey);
   },
 
-  /**
-   * Uses Gemini to parse raw copy-pasted text from the Google Pacing Sheet
-   * into a structured 40-week academic array.
-   */
   parseGoogleSheetText: async (rawText: string, apiKey: string): Promise<PacingWeek[]> => {
     const prompt = `
       TASK: Parse the following raw text from a Thales Academy Pacing Google Sheet into a structured JSON array.
