@@ -1,4 +1,3 @@
-import { useState, useEffect } from 'react';
 import { Outlet, NavLink } from 'react-router-dom';
 import { 
   LayoutDashboard, 
@@ -26,110 +25,23 @@ import { useAuth } from '../contexts/AuthContext';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
-import { githubService, GitHubRepo } from '../services/service.github';
-import { protocolService, AuditReport } from '../services/service.protocol';
-import { syncService } from '../services/service.sync';
-import { toast } from 'sonner';
+import { useDashboardLogic } from '../hooks/hook.useDashboardLogic';
 
 export function DashboardLayout() {
   const { logOut } = useAuth();
   const sidebarOpen = useStore((state) => state.sidebarOpen);
   const heartbeatLogs = useStore((state) => state.heartbeatLogs);
-  const addLog = useStore((state) => state.addLog);
   
-  const [gitToken, setGitToken] = useState<string | null>(localStorage.getItem('github_token'));
-  const [repos, setRepos] = useState<GitHubRepo[]>([]);
-  const [loadingRepos, setLoadingRepos] = useState(false);
-  const [auditing, setAuditing] = useState<string | null>(null);
-  const [syncing, setSyncing] = useState<string | null>(null);
-
-  useEffect(() => {
-    const handleMessage = (event: MessageEvent) => {
-      if (event.data?.type === 'GITHUB_AUTH_SUCCESS') {
-        const token = event.data.token;
-        setGitToken(token);
-        localStorage.setItem('github_token', token);
-        toast.success("GitHub Connected");
-        addLog("GitHub Handshake Successful: Indexing Nodes...");
-      }
-    };
-    window.addEventListener('message', handleMessage);
-    return () => window.removeEventListener('message', handleMessage);
-  }, [addLog]);
-
-  useEffect(() => {
-    if (gitToken) {
-      loadRepos();
-    }
-  }, [gitToken]);
-
-  const loadRepos = async () => {
-    try {
-      setLoadingRepos(true);
-      addLog("Fetching cloud repository index...");
-      const data = await githubService.fetchRepos(gitToken!);
-      setRepos(data);
-      addLog(`Synchronized ${data.length} repositories.`);
-    } catch (err) {
-      console.error(err);
-      toast.error("Cloud Repository Sync Failed");
-    } finally {
-      setLoadingRepos(false);
-    }
-  };
-
-  const handleConnectGit = async () => {
-    try {
-      addLog("Initializing GitHub Handshake...");
-      const res = await fetch("/api/auth/github/url");
-      const { url } = await res.json();
-      window.open(url, 'github_oauth', 'width=600,height=700');
-    } catch (err) {
-      toast.error("Failed to initialize handshake");
-    }
-  };
-
-  const handlePullUpdates = async (repoFullName: string) => {
-    try {
-      setSyncing(repoFullName);
-      addLog(`Initiating Cloud Merge for: ${repoFullName}...`);
-      addLog("Pulling pacing.json from master branch...");
-      
-      const result = await syncService.pullPacingUpdates(repoFullName, gitToken!);
-      
-      addLog(result.message);
-      toast.success("Cloud Synchronized", {
-        description: result.message,
-        duration: 5000,
-      });
-    } catch (err) {
-      addLog("CRITICAL: Master Sync Failure. Dependency fetch error.");
-      toast.error("Merge Protocol Failure");
-    } finally {
-      setSyncing(null);
-    }
-  };
-
-  const runThalesProtocol = async (repoFullName: string) => {
-    try {
-      setAuditing(repoFullName);
-      addLog(`Engaging Thales Protocol Audit for: ${repoFullName}`);
-      addLog("Invariants Loaded: Analyzing Friday Rule & Math Test Triple...");
-      
-      const report = await protocolService.runDeepAudit(repoFullName, gitToken!);
-      
-      addLog(`Audit Finalized. Score: ${report.score}% - ${report.summary}`);
-      toast.success(`Protocol Success: Score ${report.score}`, {
-        description: report.findings.length > 0 ? report.findings[0].issue : "No violations found.",
-        duration: 5000,
-      });
-    } catch (err) {
-      addLog("CRITICAL: Audit Engine Failure.");
-      toast.error("Audit Engine Error");
-    } finally {
-      setAuditing(null);
-    }
-  };
+  const {
+    gitToken,
+    repos,
+    loadingRepos,
+    auditing,
+    syncing,
+    handleConnectGit,
+    handlePullUpdates,
+    runThalesProtocol
+  } = useDashboardLogic();
 
   const navItems = [
     { icon: LayoutDashboard, label: 'Dashboard', to: '/' },

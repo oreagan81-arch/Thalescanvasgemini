@@ -98,35 +98,49 @@ export const geminiHelper = {
    */
   generateStructuredJSON: async <T>(prompt: string, schemaProperties: any, requiredFields: string[] = [], apiKey?: string): Promise<T> => {
     const ai = apiKey ? new GoogleGenAI({ apiKey }) : defaultAi;
-    return await callWithBackoff(async () => {
-      const response = await ai.models.generateContent({
-        model: MODEL_NAME,
-        contents: prompt,
-        config: {
-          systemInstruction: SYSTEM_INSTRUCTION,
-          responseMimeType: "application/json",
-          responseSchema: {
-            type: Type.OBJECT,
-            properties: schemaProperties,
-            required: requiredFields
-          },
-          temperature: 0.1
-        }
-      });
+    
+    // Task 3: Implement a fallback/retry mechanism (exponential backoff) if JSON.parse fails.
+    let parseRetries = 0;
+    const maxParseRetries = 3;
 
+    while (parseRetries < maxParseRetries) {
       try {
+        const response = await callWithBackoff(async () => {
+          return await ai.models.generateContent({
+            model: MODEL_NAME,
+            contents: prompt,
+            config: {
+              systemInstruction: SYSTEM_INSTRUCTION,
+              responseMimeType: "application/json",
+              responseSchema: {
+                type: Type.OBJECT,
+                properties: schemaProperties,
+                required: requiredFields
+              },
+              temperature: 0.1
+            }
+          });
+        });
+
         const text = response.text;
         if (!text) throw new Error("Invalid JSON response.");
         
-        // Fix 3: Strict regex cleaner for JSON blocks
+        // Task 3: Regex filter to response parsing
         const cleanText = text.replace(/```json/g, '').replace(/```/g, '').trim();
         
         return JSON.parse(cleanText) as T;
       } catch (error: any) {
-        console.error("Gemini JSON Generation Error:", error);
-        throw new Error(error.message || "Failed to generate structured curriculum data.");
+        parseRetries++;
+        console.warn(`JSON Parse Attempt ${parseRetries} failed:`, error.message);
+        if (parseRetries >= maxParseRetries) {
+          console.error("Gemini JSON Generation Error (Terminal):", error);
+          throw new Error(error.message || "Failed to generate structured curriculum data after multiple attempts.");
+        }
+        // Small delay before retrying parse/generation
+        await sleep(1000 * parseRetries);
       }
-    });
+    }
+    throw new Error("Critical Failure in JSON Generation");
   }
 };
 

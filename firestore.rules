@@ -1,50 +1,25 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
+    function isAuthenticated() { return request.auth != null; }
     
-    // A helper function to check if the user is signed in
-    function isAuthenticated() {
-      return request.auth != null;
-    }
-
-    // Default rule: Deny everything
-    match /{document=**} {
-      allow read, write: if false;
-    }
-
-    // Lock all root-level collections where userId is stored
+    // User profile and private settings
     match /users/{userId} {
       allow read, write: if isAuthenticated() && request.auth.uid == userId;
-      
-      // Allow access to all subcollections under the user's document
-      match /{subcollection}/{docId} {
+      match /{allSubcollections=**} {
         allow read, write: if isAuthenticated() && request.auth.uid == userId;
       }
-    }
-    
-    // Core Collections used by the app
-    match /announcements/{docId} {
-      allow read, write: if isAuthenticated() && request.auth.uid == resource.data.userId;
-      allow create: if isAuthenticated() && request.auth.uid == request.resource.data.userId;
-    }
-    
-    match /assignments/{docId} {
-      allow read, write: if isAuthenticated() && request.auth.uid == resource.data.userId;
-      allow create: if isAuthenticated() && request.auth.uid == request.resource.data.userId;
-    }
-
-    match /planner_rows/{docId} {
-      allow read, write: if isAuthenticated() && request.auth.uid == resource.data.userId;
-      allow create: if isAuthenticated() && request.auth.uid == request.resource.data.userId;
-    }
-
-    match /courses/{docId} {
-      allow read, write: if isAuthenticated() && request.auth.uid == resource.data.userId;
-      allow create: if isAuthenticated() && request.auth.uid == request.resource.data.userId;
     }
 
     match /settings/{userId} {
       allow read, write: if isAuthenticated() && request.auth.uid == userId;
+    }
+    
+    // Global collections mapped by userId field for data ownership
+    match /{collectionName}/{docId} {
+      allow read, write: if isAuthenticated() && 
+        (resource == null || resource.data.userId == request.auth.uid) &&
+        (request.resource == null || request.resource.data.userId == request.auth.uid);
     }
   }
 }

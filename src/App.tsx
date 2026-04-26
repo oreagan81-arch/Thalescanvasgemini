@@ -17,7 +17,7 @@ const queryClient = new QueryClient({
 
 import { Login } from './pages/Login';
 import { Dashboard } from './pages/Dashboard';
-import { Planner } from './pages/Planner';
+import Planner from './pages/Planner';
 import { CanvasPages } from './pages/CanvasPages';
 import { Assignments } from './pages/Assignments';
 import { Announcements } from './pages/Announcements';

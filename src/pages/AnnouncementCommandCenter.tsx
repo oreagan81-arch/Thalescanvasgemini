@@ -104,8 +104,7 @@ export default function AnnouncementCommandCenter() {
       await canvasApiService.postAnnouncement(
         result.title,
         result.bodyHTML,
-        canvasCourseId,
-        canvasApiToken
+        canvasCourseId
       );
       toast.success("Announcement successfully posted to Canvas!");
     } catch (error: any) {

@@ -9,6 +9,7 @@ export interface PacingWeek {
   historyScience: string;
   elaChapter: string;
   majorTests: string[];
+  assignments?: any[];
 }
 
 export const pacingImportService = {

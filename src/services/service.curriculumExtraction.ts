@@ -1,161 +1,127 @@
-import { geminiHelper } from "../lib/geminiHelper";
-import { generateFriendlySlug } from "../lib/thales/rulesEngine";
-import { UserSettings } from "./service.settings";
-import { Type } from "@google/genai";
+import { useStore } from '../store';
+import { rulesEngine } from '../lib/thales/rulesEngine';
+import { GoogleGenAI, Type } from "@google/genai";
 
-export interface SyllabusExtractionResult {
-  pacingPlan: {
-    weekId: string;
-    rows: any[];
-  };
-  announcements: {
-    title: string;
-    bodyHTML: string;
-    suggestedPostDate: string;
-  }[];
-  resources: {
-    title: string;
-    friendlyUrl: string;
-    type: string;
-  }[];
-  htmlBlock: string;
-  aiAuditorWarnings: string[];
+export interface ExtractedAssignment {
+  title: string;
+  type: "Assignment" | "Quiz" | "Test" | "Discussion";
+  description: string;
+}
+
+export interface ExtractedWeek {
+  weekId: string;
+  subject: string;
+  topic: string;
+  assignments: ExtractedAssignment[];
 }
 
 /**
- * Acts as the Content Organizer & Mapping Engine.
- * Extracts structured Thales entities from a raw syllabus text.
+ * Converts a File object to a base64 string for Gemini API consumption
  */
-export async function extractCurriculumFromSyllabus(
-  rawText: string,
-  subject: string,
-  weekId: string,
-  settings: UserSettings
-): Promise<SyllabusExtractionResult | null> {
-  const SYSTEM_PROMPT = `
-ACT AS: Thales Academy Content Organizer & Mapping Engine.
-TASK: Parse the following RAW SYLLABUS text for the subject "${subject}" into a structured curriculum.
+const fileToBase64 = (file: File): Promise<string> => {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.readAsDataURL(file);
+    reader.onload = () => {
+      const base64String = (reader.result as string).split(',')[1];
+      resolve(base64String);
+    };
+    reader.onerror = (error) => reject(error);
+  });
+};
 
-STRUCTURED ENTITIES TO EXTRACT:
-1. Assignments: Map to a "Pacing Plan" row format.
-2. Announcements: Draft a parent-friendly Canvas announcement.
-3. Resources: List all physical or digital files mentioned.
-4. AI AUDITOR WARNINGS: Review the pacing and content. If you detect anomalies (e.g., a major test scheduled on a Monday, missing study guides for a test week, overlapping homework), generate a list of warnings for the teacher.
+export const curriculumExtractionService = {
+  /**
+   * Sends a document (PDF or Image) to Gemini to extract structured curriculum data
+   */
+  async extractFromDocument(file: File): Promise<ExtractedWeek[]> {
+    const { geminiApiKey } = useStore.getState();
+    const apiKey = geminiApiKey || (typeof process !== 'undefined' ? process.env.GEMINI_API_KEY : "") || "";
 
-FORMATTING RULES (STRICT):
-- Assignments must include: Day (Monday-Friday), Subject, Lesson Title, Homework.
-- Announcements must follow Thales tone: Professional, Encouraging. Use <h2> headers.
-- Resources must be listed with clear titles.
-`;
-
-  const schemaProperties = {
-    rows: {
-      type: Type.ARRAY,
-      items: {
-        type: Type.OBJECT,
-        properties: {
-          day: { type: Type.STRING },
-          lessonTitle: { type: Type.STRING },
-          homework: { type: Type.STRING },
-          type: { type: Type.STRING }
-        },
-        required: ["day", "lessonTitle", "homework", "type"]
-      }
-    },
-    announcements: {
-      type: Type.ARRAY,
-      items: {
-        type: Type.OBJECT,
-        properties: {
-          title: { type: Type.STRING },
-          bodyHTML: { type: Type.STRING },
-          suggestedPostDate: { type: Type.STRING }
-        },
-        required: ["title", "bodyHTML", "suggestedPostDate"]
-      }
-    },
-    resources: {
-      type: Type.ARRAY,
-      items: {
-        type: Type.OBJECT,
-        properties: {
-          title: { type: Type.STRING },
-          type: { type: Type.STRING }
-        },
-        required: ["title", "type"]
-      }
-    },
-    aiAuditorWarnings: {
-      type: Type.ARRAY,
-      items: { type: Type.STRING }
+    if (!apiKey) {
+      throw new Error("GEMINI_API_KEY_MISSING: Please configure your Gemini API Key in Settings.");
     }
-  };
 
-  const requiredFields = ["rows", "announcements", "resources", "aiAuditorWarnings"];
+    const ai = new GoogleGenAI({ apiKey });
+    const base64Data = await fileToBase64(file);
+    const mimeType = file.type;
 
-  try {
-    const parsed = await geminiHelper.generateStructuredJSON<any>(
-      SYSTEM_PROMPT + "\n\nRAW SYLLABUS TEXT:\n" + rawText,
-      schemaProperties,
-      requiredFields
-    );
-    
-    if (!parsed) return null;
-
-    // Post-processing: Add Friendly URLs and Thales Formatting
-    const resourcesWithUrls = (parsed.resources || []).map((r: any) => ({
-      ...r,
-      friendlyUrl: generateFriendlySlug('resources', r.title, Math.random().toString(36).substring(7))
-    }));
-
-    // Generate HTML Block for Page Builder
-    const htmlBlock = `
-<div class="thales-page-container">
-  <h2 class="text-2xl font-bold border-l-4 border-amber-500 pl-4 mb-6">${subject} - Weekly Overview</h2>
-  <div class="syllabus-section mb-8">
-    <h3 class="text-xl font-bold mb-4">Weekly Assignments</h3>
-    <table class="w-full border-collapse">
-      <thead>
-        <tr class="bg-slate-100">
-          <th class="p-2 border">Day</th>
-          <th class="p-2 border">Topic</th>
-          <th class="p-2 border">Homework</th>
-        </tr>
-      </thead>
-      <tbody>
-        ${(parsed.rows || []).map((row: any) => `
-          <tr>
-            <td class="p-2 border font-bold">${row.day}</td>
-            <td class="p-2 border">${row.lessonTitle}</td>
-            <td class="p-2 border italic">${row.homework}</td>
-          </tr>
-        `).join('')}
-      </tbody>
-    </table>
-  </div>
-  <div class="resources-section">
-    <h3 class="text-xl font-bold mb-4">Resources</h3>
-    <ul class="list-disc pl-6 space-y-2">
-      ${resourcesWithUrls.map((r: any) => `
-        <li><a href="${r.friendlyUrl}" class="text-amber-600 hover:underline">${r.title}</a> (${r.type})</li>
-      `).join('')}
-    </ul>
-  </div>
-</div>
+    const systemPrompt = `
+      You are an elite academic registrar and curriculum specialist. 
+      Your task is to analyze the provided syllabus or pacing guide and extract all weekly instructional data.
+      
+      RULES:
+      1. Extract every week mentioned.
+      2. Identify subjects, topics, and specific assignments/tests.
+      3. Friday Agenda Rule: Omit 'In Class' instructional sections for Fridays; focus exclusively on assessments.
+      4. Reading Checkout Rule: For Reading assignments, include the Fluency Goal: '100 words per minute (WPM) with 2 or fewer errors.'
+      5. Thales Standard: Strip vendor names from titles (e.g., 'Saxon Math 4' -> 'Math').
+      6. Return ONLY a valid JSON array matching the required schema.
+      
+      Do not include conversational text or markdown blocks. Return raw JSON.
     `;
 
-    return {
-      pacingPlan: {
-        weekId,
-        rows: parsed.rows || []
-      },
-      announcements: parsed.announcements || [],
-      resources: resourcesWithUrls,
-      htmlBlock,
-      aiAuditorWarnings: parsed.aiAuditorWarnings || []
-    };
-  } catch (error) {
-    console.error("Failed to extract curriculum from syllabus", error);
-    return null;
+    try {
+      const response = await ai.models.generateContent({
+        model: "gemini-3-flash-preview",
+        contents: [
+          { text: "Extract the curriculum from this document into the required JSON format." },
+          { inlineData: { mimeType, data: base64Data } }
+        ],
+        config: {
+          systemInstruction: systemPrompt,
+          responseMimeType: "application/json",
+          responseSchema: {
+            type: Type.ARRAY,
+            items: {
+              type: Type.OBJECT,
+              properties: {
+                weekId: { type: Type.STRING, description: "e.g., 'W1', 'W2'" },
+                subject: { type: Type.STRING },
+                topic: { type: Type.STRING },
+                assignments: {
+                  type: Type.ARRAY,
+                  items: {
+                    type: Type.OBJECT,
+                    properties: {
+                      title: { type: Type.STRING },
+                      type: { 
+                        type: Type.STRING,
+                        enum: ["Assignment", "Quiz", "Test", "Discussion"]
+                      },
+                      description: { type: Type.STRING }
+                    },
+                    required: ["title", "type", "description"]
+                  }
+                }
+              },
+              required: ["weekId", "subject", "topic", "assignments"]
+            },
+          }
+        }
+      });
+
+      const text = response.text;
+      
+      if (!text) throw new Error("No data returned from AI");
+
+      let rawData = JSON.parse(text) as ExtractedWeek[];
+
+      // Apply the Silent Auditor (Rules Engine) to sanitize vendor names
+      const sanitizedData = rawData.map((week) => ({
+        ...week,
+        topic: rulesEngine.silentAuditor(week.topic),
+        assignments: week.assignments.map((a) => ({
+          ...a,
+          title: rulesEngine.silentAuditor(a.title),
+          description: rulesEngine.silentAuditor(a.description)
+        }))
+      }));
+
+      return sanitizedData;
+    } catch (error) {
+      console.error("Extraction Error:", error);
+      throw error;
+    }
   }
-}
+};

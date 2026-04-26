@@ -34,22 +34,20 @@ interface AnnouncementReviewerProps {
   isProcessing?: boolean;
 }
 
-export function AnnouncementReviewer({ 
+export const AnnouncementReviewer = React.memo(({ 
   announcement, 
   onApprove, 
   onRegenerate,
   isProcessing = false 
-}: AnnouncementReviewerProps) {
+}: AnnouncementReviewerProps) => {
   const [editedTitle, setEditedTitle] = useState(announcement.title);
   const [editedBody, setEditedBody] = useState(announcement.bodyHTML);
   const [postDate, setPostDate] = useState<Date>(
     announcement.suggestedPostDate ? new Date(announcement.suggestedPostDate) : new Date()
   );
-  const [checklist, setChecklist] = useState<Record<string, boolean>>(
-    announcement.requiredAttachments.reduce((acc, item) => ({ ...acc, [item]: false }), {})
-  );
+  const [checklist, setChecklist] = useState<Record<string, boolean>>({});
 
-  // Sync internal state if announcement prop changes
+  // Sync internal state ONLY when announcement payload actually changes
   useEffect(() => {
     setEditedTitle(announcement.title);
     setEditedBody(announcement.bodyHTML);
@@ -57,7 +55,7 @@ export function AnnouncementReviewer({
     if (announcement.suggestedPostDate) {
       setPostDate(new Date(announcement.suggestedPostDate));
     }
-  }, [announcement]);
+  }, [announcement.title, announcement.bodyHTML, announcement.suggestedPostDate]);
 
   const handleToggleChecklist = (item: string) => {
     setChecklist(prev => ({ ...prev, [item]: !prev[item] }));
@@ -69,7 +67,7 @@ export function AnnouncementReviewer({
       title: editedTitle,
       bodyHTML: editedBody,
       suggestedPostDate: postDate.toISOString(),
-      requiredAttachments: Object.keys(checklist) // Keep all, but checklist is local for verification
+      requiredAttachments: Object.keys(checklist)
     });
   };
 
@@ -251,4 +249,4 @@ export function AnnouncementReviewer({
       </div>
     </div>
   );
-}
+});

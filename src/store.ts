@@ -1,9 +1,7 @@
-import { create } from 'zustand';
+import { create, StateCreator } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import { calendarService } from './services/service.calendar';
 import { PacingWeek } from './services/service.pacingImport';
-
-// --- Types ---
 
 interface UISlice {
   sidebarOpen: boolean;
@@ -51,87 +49,76 @@ interface SettingsSlice {
 
 export type ThalesState = UISlice & AcademicSlice & DataSlice & CommandSlice & SettingsSlice;
 
-// --- Initial Constants ---
 const initialContext = calendarService.getAcademicContext();
 
-// --- Main Store ---
+const createUISlice: StateCreator<ThalesState, [], [], UISlice> = (set) => ({
+  sidebarOpen: true,
+  theme: 'dark',
+  heartbeatLogs: ["[SYSTEM] Thales OS v4.0 initialized.", "[HEARTBEAT] Determinism Engine Stable."],
+  toggleSidebar: () => set((state) => ({ sidebarOpen: !state.sidebarOpen })),
+  setTheme: (theme) => set({ theme }),
+  addLog: (msg) => set((state) => ({ 
+    heartbeatLogs: [...state.heartbeatLogs.slice(-20), `[${new Date().toLocaleTimeString()}] ${msg}`] 
+  })),
+  clearLogs: () => set({ heartbeatLogs: [] }),
+});
+
+const createAcademicSlice: StateCreator<ThalesState, [], [], AcademicSlice> = (set) => ({
+  selectedWeek: calendarService.getWeekId(initialContext),
+  selectedQuarter: initialContext.quarter,
+  setWeek: (week) => set({ selectedWeek: week }),
+  setQuarter: (quarter) => set({ selectedQuarter: quarter }),
+});
+
+const createDataSlice: StateCreator<ThalesState, [], [], DataSlice> = (set) => ({
+  lastSyncedAt: null,
+  plannerData: null,
+  setLastSynced: (date) => set({ lastSyncedAt: date.toISOString() }),
+  setPlannerData: (data) => set({ plannerData: data }),
+});
+
+const createCommandSlice: StateCreator<ThalesState, [], [], CommandSlice> = (set) => ({
+  recentCommands: [],
+  favoriteTemplates: [],
+  lastUsedSubject: 'Math',
+  addRecentCommand: (cmd) => set((state) => ({
+    recentCommands: [cmd, ...state.recentCommands.filter((c) => c !== cmd)].slice(0, 10)
+  })),
+  saveTemplate: (template) => set((state) => ({
+    favoriteTemplates: [...state.favoriteTemplates, template]
+  })),
+  setLastUsedSubject: (subject) => set({ lastUsedSubject: subject }),
+  clearHistory: () => set({ recentCommands: [], lastUsedSubject: null }),
+});
+
+const createSettingsSlice: StateCreator<ThalesState, [], [], SettingsSlice> = (set) => ({
+  geminiApiKey: import.meta.env.VITE_GEMINI_API_KEY || '',
+  canvasApiToken: import.meta.env.VITE_CANVAS_API_TOKEN || '',
+  canvasCourseIds: {
+    'Homeroom': '22254', 'Math': '21957', 'Reading': '21919', 'Spelling': '21919', 
+    'Language Arts': '21944', 'ELA': '21944', 'Science': '21970', 'History': '21934'
+  },
+  schoolStartDate: null,
+  pacingGuideUrl: 'https://docs.google.com/spreadsheets/d/1RpMrcQqqrDl2Gaqo2LaGTDQWvrsYwBntbYOXlIrM7LA/edit?gid=287822418#gid=287822418',
+  setSettings: (settings) => set((state) => ({ ...state, ...settings })),
+  updateCourseId: (subject, newId) => set((state) => ({
+    canvasCourseIds: { ...state.canvasCourseIds, [subject]: newId }
+  })),
+});
 
 export const useStore = create<ThalesState>()(
   persist(
-    (set) => ({
-      // UI Slice
-      sidebarOpen: true,
-      theme: 'dark',
-      heartbeatLogs: ["[SYSTEM] Thales OS v4.0 initialized.", "[HEARTBEAT] Determinism Engine Stable."],
-      toggleSidebar: () => set((state) => ({ sidebarOpen: !state.sidebarOpen })),
-      setTheme: (theme) => set({ theme }),
-      addLog: (msg: string) => set((state) => ({ 
-        heartbeatLogs: [...state.heartbeatLogs.slice(-20), `[${new Date().toLocaleTimeString()}] ${msg}`] 
-      })),
-      clearLogs: () => set({ heartbeatLogs: [] }),
-
-      // Academic Slice
-      selectedWeek: calendarService.getWeekId(initialContext),
-      selectedQuarter: initialContext.quarter,
-      setWeek: (week: string) => set({ selectedWeek: week }),
-      setQuarter: (quarter: number) => set({ selectedQuarter: quarter }),
-
-      // Data Slice
-      lastSyncedAt: null,
-      plannerData: null,
-      setLastSynced: (date: Date) => set({ lastSyncedAt: date.toISOString() }),
-      setPlannerData: (data: PacingWeek[] | null) => set({ plannerData: data }),
-
-      // Command Slice
-      recentCommands: [],
-      favoriteTemplates: [],
-      lastUsedSubject: 'Math',
-      addRecentCommand: (cmd: string) => set((state) => ({
-        recentCommands: [cmd, ...state.recentCommands.filter(c => c !== cmd)].slice(0, 10)
-      })),
-      saveTemplate: (template: any) => set((state) => ({
-        favoriteTemplates: [...state.favoriteTemplates, template]
-      })),
-      setLastUsedSubject: (subject: string) => set({ lastUsedSubject: subject }),
-      clearHistory: () => set({ recentCommands: [], lastUsedSubject: null }),
-
-      // Settings Slice
-      geminiApiKey: (typeof process !== 'undefined' && process.env.GEMINI_API_KEY) || '',
-      canvasApiToken: (typeof process !== 'undefined' && process.env.CANVAS_API_TOKEN) || '',
-      
-      canvasCourseIds: {
-        'Homeroom': '22254',
-        'Math': '21957',
-        'Reading': '21919',
-        'Spelling': '21919', 
-        'Language Arts': '21944',
-        'ELA': '21944',      
-        'Science': '21970',
-        'History': '21934'
-      },
-
-      schoolStartDate: null,
-      
-      // Hardcoded exact Master Pacing Guide URL
-      pacingGuideUrl: 'https://docs.google.com/spreadsheets/d/1RpMrcQqqrDl2Gaqo2LaGTDQWvrsYwBntbYOXlIrM7LA/edit?gid=287822418#gid=287822418',
-
-      setSettings: (settings) => set((state) => ({ ...state, ...settings })),
-      
-      updateCourseId: (subject: string, newId: string) => set((state) => ({
-        canvasCourseIds: {
-          ...state.canvasCourseIds,
-          [subject]: newId
-        }
-      })),
+    (set, get, api) => ({
+      ...createUISlice(set, get, api),
+      ...createAcademicSlice(set, get, api),
+      ...createDataSlice(set, get, api),
+      ...createCommandSlice(set, get, api),
+      ...createSettingsSlice(set, get, api),
     }),
     {
       name: 'thales-os-storage',
       version: 6, 
       storage: createJSONStorage(() => localStorage),
-      migrate: (persistedState: any, version: number) => {
-        if (version < 6) return persistedState;
-        return persistedState;
-      },
       partialize: (state) => ({
         selectedWeek: state.selectedWeek,
         selectedQuarter: state.selectedQuarter,

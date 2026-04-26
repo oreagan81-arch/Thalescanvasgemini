@@ -1,6 +1,43 @@
-
+import { addWeeks, parseISO, startOfWeek, isValid } from 'date-fns';
 import { geminiHelper } from '../lib/geminiHelper';
 import { AcademicBreak } from '../lib/calendarMappings';
+import { PacingWeek } from './service.pacingImport';
+
+export const calendarSync = {
+  /**
+   * Takes existing pacing rows and repositions them relative to a new start date.
+   */
+  migratePacing(oldData: PacingWeek[], newStartDate: string): PacingWeek[] {
+    const newStart = parseISO(newStartDate);
+    
+    if (!isValid(newStart)) {
+      throw new Error("Invalid start date provided for migration.");
+    }
+
+    const firstMonday = startOfWeek(newStart, { weekStartsOn: 1 });
+
+    return oldData.map((week, index) => {
+      // Calculate current quarter/week (assuming 9 weeks per quarter)
+      const totalWeeks = index;
+      const quarter = Math.floor(totalWeeks / 9) + 1;
+      const weekInQuarter = (totalWeeks % 9) + 1;
+      const newWeekId = `Q${quarter}_W${weekInQuarter}`;
+
+      // Calculate the new Monday for this specific week (for logging or future date fields)
+      const shiftedMonday = addWeeks(firstMonday, index);
+      
+      return {
+        ...week,
+        weekId: newWeekId,
+        assignments: (week.assignments || []).map((a: any) => ({
+          ...a,
+          completed: false,
+          syncedToCanvas: false
+        }))
+      };
+    });
+  }
+};
 
 export const calendarSyncService = {
   /**
