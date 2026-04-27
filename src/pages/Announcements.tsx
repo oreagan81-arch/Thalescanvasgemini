@@ -31,6 +31,8 @@ const groupHistory = (announcements: Announcement[]) => {
     'Older': []
   };
 
+  if (!Array.isArray(announcements)) return groups;
+
   const now = new Date();
   const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
   // Start of week (Sunday)

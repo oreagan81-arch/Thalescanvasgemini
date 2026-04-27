@@ -32,41 +32,45 @@ export const SyllabusMapper: React.FC<{ weekId?: string }> = () => {
   const [error, setError] = useState<string | null>(null);
 
   const auditResults = useMemo(() => {
-    if (!previewData) return [];
+    if (!previewData || !Array.isArray(previewData)) return [];
     
-    return previewData.map(week => {
-      const audits: { type: 'math' | 'reading' | 'ela', errors: string[] }[] = [];
-
-      // Math Audit
-      const mathTestNumRaw = typeof week.mathLesson === 'string' 
-        ? week.mathLesson.toLowerCase().match(/test\s*(\d+)/)?.[1] 
-        : null;
-      
-      if (mathTestNumRaw) {
-        const num = parseInt(mathTestNumRaw, 10);
-        if (!isNaN(num)) {
-          const audit = rulesEngine.verifyCurriculum('math', num, week.mathLesson);
-          if (!audit.isValid) audits.push({ type: 'math', errors: audit.errors });
+    try {
+      return previewData.map((week, index) => {
+        if (!week) {
+          console.warn(`[DIAGNOSTIC] Null week entry at index ${index}`);
+          return null;
         }
-      }
+        const audits: { type: 'math' | 'reading' | 'ela', errors: string[] }[] = [];
 
-      // Reading Audit
-      const readingWeekNumRaw = typeof week.readingWeek === 'string'
-        ? week.readingWeek.toLowerCase().match(/week\s*(\d+)/)?.[1] || week.readingWeek.match(/(\d+)/)?.[1]
-        : null;
-
-      if (readingWeekNumRaw) {
-        const num = parseInt(readingWeekNumRaw, 10);
-        if (!isNaN(num)) {
-          const audit = rulesEngine.verifyCurriculum('reading', num, `Reading Week ${num}`); 
-          // We pass a synthetic string for reading check if needed, 
-          // but currently reading week focus is in week.spellingFocus or similar?
-          // Actually, let's just audit Math for now as per current mappings coverage.
+        // Math Audit
+        const mathLesson = week.mathLesson ?? '';
+        const mathTestNumRaw = typeof mathLesson === 'string' 
+          ? mathLesson.toLowerCase().match(/test\s*(\d+)/)?.[1] 
+          : null;
+        
+        if (mathTestNumRaw) {
+          const num = parseInt(mathTestNumRaw, 10);
+          if (!isNaN(num)) {
+            try {
+              const audit = rulesEngine.verifyCurriculum('math', num, mathLesson);
+              if (audit && !audit.isValid && Array.isArray(audit.errors)) {
+                audits.push({ type: 'math', errors: audit.errors });
+              }
+            } catch (auditErr) {
+              console.warn(`[DIAGNOSTIC] Rules engine failure at week ${week.weekNumber}:`, auditErr);
+            }
+          }
         }
-      }
 
-      return audits.length > 0 ? { week: week.weekNumber, errors: audits.flatMap(a => a.errors) } : null;
-    }).filter(Boolean) as { week: number; errors: string[] }[];
+        // Reading/ELA Audit placeholders (defensive)
+        // ... (can add more if rulesEngine supports them)
+
+        return audits.length > 0 ? { week: week.weekNumber ?? index, errors: audits.flatMap(a => a.errors) } : null;
+      }).filter((a): a is { week: number; errors: string[] } => a !== null);
+    } catch (err) {
+      console.warn("[DIAGNOSTIC] auditResults calculation failed entirely:", err);
+      return [];
+    }
   }, [previewData]);
 
   const handleImport = async () => {
@@ -217,17 +221,17 @@ export const SyllabusMapper: React.FC<{ weekId?: string }> = () => {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {previewData.map((row, i) => {
-                    const hasAuditError = auditResults.some(a => a.week === row.weekNumber);
+                  {previewData?.map((row, i) => {
+                    const hasAuditError = auditResults?.some(a => a?.week === row?.weekNumber);
                     return (
                       <TableRow 
                         key={i} 
                         className={`hover:bg-zinc-50 dark:hover:bg-zinc-900/50 transition-colors ${hasAuditError ? 'bg-red-50/50 dark:bg-red-900/10' : ''}`}
                       >
-                        <TableCell className="font-bold">W{row.weekNumber}</TableCell>
-                        <TableCell className="text-sm">{row.mathLesson}</TableCell>
-                        <TableCell className="text-sm">Reading W{row.readingWeek}</TableCell>
-                        <TableCell className="text-sm italic text-zinc-600 dark:text-zinc-400">{row.elaChapter}</TableCell>
+                        <TableCell className="font-bold">W{row?.weekNumber}</TableCell>
+                        <TableCell className="text-sm">{row?.mathLesson}</TableCell>
+                        <TableCell className="text-sm">Reading W{row?.readingWeek}</TableCell>
+                        <TableCell className="text-sm italic text-zinc-600 dark:text-zinc-400">{row?.elaChapter}</TableCell>
                       </TableRow>
                     );
                   })}

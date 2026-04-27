@@ -311,16 +311,16 @@ export default function Planner() {
                     <Button variant="ghost" size="sm" onClick={() => setPreviewData(null)} className="text-slate-500 h-6">Cancel</Button>
                   </div>
                   <div className="max-h-64 overflow-y-auto space-y-2 rounded-lg border border-white/10 p-2 bg-black/20">
-                    {previewData.slice(0, 5).map((p, i) => (
+                    {previewData?.slice(0, 5).map((p, i) => (
                       <div key={i} className="p-2 border-b border-white/5 last:border-0 flex items-center justify-between">
                         <div>
-                          <p className="text-[11px] font-bold text-amber-500 uppercase">{p.weekId}</p>
-                          <p className="text-xs font-medium truncate max-w-[200px]">{p.topic || 'No Topic'}</p>
+                          <p className="text-[11px] font-bold text-amber-500 uppercase">{p?.weekId}</p>
+                          <p className="text-xs font-medium truncate max-w-[200px]">{p?.topic || 'No Topic'}</p>
                         </div>
-                        <Badge variant="outline" className="text-[9px] opacity-50">{p.assignments?.length || 0} items</Badge>
+                        <Badge variant="outline" className="text-[9px] opacity-50">{p?.assignments?.length || 0} items</Badge>
                       </div>
                     ))}
-                    {previewData.length > 5 && <p className="text-center text-[10px] text-slate-600 pt-2 italic">...and {previewData.length - 5} more weeks</p>}
+                    {(previewData?.length ?? 0) > 5 && <p className="text-center text-[10px] text-slate-600 pt-2 italic">...and {(previewData?.length ?? 0) - 5} more weeks</p>}
                   </div>
                 </div>
               )}
