@@ -9,8 +9,8 @@ import { useStore } from "../store";
  * Handles Exponential Backoff, Prompt Injection Defenses, and Structured Responses.
  */
 
-// User requested this specific model
-const MODEL_NAME = "gemini-2.5-flash-preview-09-2025";
+// User requested this specific model / Refactored to Gemini 3 series for better reasoning and compliance.
+const MODEL_NAME = "gemini-3-flash-preview";
 
 /**
  * STRICT SYSTEM INSTRUCTION (Prompt Injection & Formatting Defense)
@@ -34,6 +34,7 @@ THALES ACADEMY GRADING & POSTING RULES:
 2. READING CHECKOUT RULE: Always include the Fluency Goal: "100 words per minute (WPM) with 2 or fewer errors."
 3. BREVITY MANDATE: STRIP all vendor names (Saxon, Shurley, Story of the World) from student-facing titles.
 4. MERGED POSTINGS: Reading and Spelling must be posted together as one integrated block.
+5. BRANDING LOCKDOWN: You are strictly forbidden from changing the primary color away from the institutional #0065a7. You may only suggest layout changes, not color palette changes.
 `;
 
 /**

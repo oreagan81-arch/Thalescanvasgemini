@@ -95,12 +95,12 @@ export function PlannerSyncDiff({ courseId, courseName }: PlannerSyncDiffProps) 
         setIsOpen(open);
         if (open) handleCalculateDiff();
     }}>
-      <DialogTrigger asChild>
+      <DialogTrigger render={
         <Button variant="outline" className="border-emerald-500/20 text-emerald-500 hover:bg-emerald-500/10">
           <Cloud className="w-4 h-4 mr-2" />
           Sync {courseName}
         </Button>
-      </DialogTrigger>
+      }/>
       
       <DialogContent className="max-w-2xl bg-[#0d0d10] border-white/10 text-slate-100">
         <DialogHeader>

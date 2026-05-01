@@ -18,6 +18,8 @@ interface AcademicSlice {
   selectedQuarter: number;
   setWeek: (week: string) => void;
   setQuarter: (quarter: number) => void;
+  validateActiveWeek: () => void;
+  clearCache: () => void;
 }
 
 interface CommandSlice {
@@ -70,11 +72,36 @@ const createUISlice: StateCreator<ThalesState, [], [], UISlice> = (set) => ({
   clearLogs: () => set({ heartbeatLogs: [] }),
 });
 
-const createAcademicSlice: StateCreator<ThalesState, [], [], AcademicSlice> = (set) => ({
+const createAcademicSlice: StateCreator<ThalesState, [], [], AcademicSlice> = (set, get) => ({
   selectedWeek: calendarService.getWeekId(initialContext),
   selectedQuarter: initialContext.quarter,
-  setWeek: (week) => set({ selectedWeek: week }),
+  setWeek: (week) => {
+    set({ selectedWeek: week });
+    get().validateActiveWeek();
+  },
   setQuarter: (quarter) => set({ selectedQuarter: quarter }),
+  clearCache: () => {
+    console.warn("[CACHE] Forceful wipe initiated.");
+    set({ plannerData: null, lastSyncedAt: null });
+  },
+  validateActiveWeek: () => {
+    const state = get();
+    const data = state.plannerData;
+    
+    if (!data || data.length === 0) return;
+
+    // The Lesson 91 Bug: Placeholder data leaking into active weeks
+    const hasStalePlaceholder = data.some(pw => 
+      (pw.mathLesson && pw.mathLesson.includes("Lesson 91")) || 
+      (pw.readingWeek && pw.readingWeek.includes("Lesson 91"))
+    );
+
+    if (hasStalePlaceholder) {
+      console.error("[CRITICAL] Lesson 91 Stale Cache detected. Wiping local state.");
+      state.clearCache();
+      // Fresh fetch is typically handled by the subscription or a manual sync trigger in the UI
+    }
+  }
 });
 
 const createDataSlice: StateCreator<ThalesState, [], [], DataSlice> = (set) => ({
@@ -114,7 +141,7 @@ const createSettingsSlice: StateCreator<ThalesState, [], [], SettingsSlice> = (s
     'History': '21934'
   },
   schoolStartDate: null,
-  pacingGuideUrl: 'https://docs.google.com/spreadsheets/d/1RpMrcQqqrDl2Gaqo2LaGTDQWvrsYwBntbYOXlIrM7LA/edit?usp=sharing',
+  pacingGuideUrl: 'https://docs.google.com/spreadsheets/d/e/2PACX-1vTRf9-kG7C2iO75HNB2y4roFZ55YS3gyMFMijGiJsVW8Qm7njs5rTsir6U8Cvi0pljaJAh17WvbqX7f/pub?output=csv',
   setSettings: (settings) => set((state) => ({ ...state, ...settings })),
   updateCourseId: (subject, newId) => set((state) => ({
     canvasCourseIds: { ...state.canvasCourseIds, [subject]: newId }
@@ -139,7 +166,14 @@ export const useStore = create<ThalesState>()(
     }),
     {
       name: 'thales-os-storage',
-      version: 6, 
+      version: 1, 
+      migrate: (persistedState: any, version: number) => {
+        if (version === undefined || version === 0) {
+          console.warn('Persisted state version outdated or missing. Wiping cache.');
+          return {}; // Returning empty object for initial state reset
+        }
+        return persistedState;
+      },
       storage: createJSONStorage(() => localStorage),
       onRehydrateStorage: (state) => {
         return () => state.setHasHydrated(true);

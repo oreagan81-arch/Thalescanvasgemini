@@ -5,6 +5,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
 import { Alert, AlertDescription } from '@/components/ui/alert';
+import { toast } from 'sonner';
 
 // Icons
 import { 
@@ -27,9 +28,61 @@ import { rulesEngine } from '@/src/lib/thales/rulesEngine';
 export const SyllabusMapper: React.FC<{ weekId?: string }> = () => {
   const store = useThalesStore();
   const [rawText, setRawText] = useState('');
+  const [selectedQuarter, setSelectedQuarter] = useState<number>(1);
+  const [selectedWeek, setSelectedWeek] = useState<number>(1);
   const [isProcessing, setIsProcessing] = useState(false);
   const [previewData, setPreviewData] = useState<PacingWeek[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const fileInputRef = React.useRef<HTMLInputElement>(null);
+
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      // For now, just a placeholder. Real implementation needs OCR.
+      setError("Photo upload functionality requires OCR setup.");
+    }
+  };
+
+  const fetchGoogleSheetData = async (url: string): Promise<string> => {
+    try {
+      const response = await fetch(`/api/proxy/google-sheets?url=${encodeURIComponent(url)}`);
+      
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || `Failed to fetch from proxy: ${response.statusText}`);
+      }
+      
+      return await response.text();
+    } catch (err: any) {
+      console.error("[DIAGNOSTIC] Proxy fetch error:", err);
+      throw new Error(
+        err.message || "Could not pull data. Please verify the sheet is fully 'Published to Web'."
+      );
+    }
+  };
+
+  const handleAutoSync = async () => {
+    setIsProcessing(true);
+    setError(null);
+    try {
+        if (!store.pacingGuideUrl) {
+            throw new Error("Pacing Guide URL not set in Settings.");
+        }
+        if (!store.geminiApiKey) {
+            throw new Error("Gemini API Key missing.");
+        }
+
+        const rawContent = await fetchGoogleSheetData(store.pacingGuideUrl);
+        
+        const data = await pacingImportService.parse(rawContent, store.geminiApiKey);
+        setPreviewData(data);
+        toast.success("Successfully synced from Google Sheet!");
+    } catch (err: any) {
+        setError(err.message || "Failed to auto-sync.");
+    } finally {
+        setIsProcessing(false);
+    }
+  };
 
   const auditResults = useMemo(() => {
     if (!previewData || !Array.isArray(previewData)) return [];
@@ -130,6 +183,21 @@ export const SyllabusMapper: React.FC<{ weekId?: string }> = () => {
                     <CheckCircle2 className="w-3 h-3 mr-1" /> Existing Data Active
                   </Badge>
                 )}
+                
+                <div className="flex gap-2">
+                  <div className="flex items-center gap-1">
+                    <label className="text-xs text-zinc-500">Q</label>
+                    <input type="number" min="1" max="4" value={selectedQuarter} onChange={(e) => setSelectedQuarter(parseInt(e.target.value))} className="w-10 border rounded px-1" />
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <label className="text-xs text-zinc-500">W</label>
+                    <input type="number" min="1" max="10" value={selectedWeek} onChange={(e) => setSelectedWeek(parseInt(e.target.value))} className="w-10 border rounded px-1" />
+                  </div>
+                  <Button variant="outline" size="sm" onClick={handleAutoSync} className="gap-2 text-emerald-600 border-emerald-200 hover:bg-emerald-50">
+                    <Sparkles className="w-4 h-4" /> Auto Sync
+                  </Button>
+                </div>
+
                 <Button 
                   variant="outline" 
                   size="sm" 
@@ -138,6 +206,10 @@ export const SyllabusMapper: React.FC<{ weekId?: string }> = () => {
                 >
                   <ExternalLink className="w-4 h-4" />
                   Open Master Pacing Guide
+                </Button>
+                <input type="file" ref={fileInputRef} onChange={handleFileUpload} className="hidden" />
+                <Button variant="outline" size="sm" onClick={() => fileInputRef.current?.click()} className="gap-2 text-zinc-600 border-zinc-200 hover:bg-zinc-50">
+                  <FileSpreadsheet className="w-4 h-4" /> Upload Photo
                 </Button>
               </div>
             </div>

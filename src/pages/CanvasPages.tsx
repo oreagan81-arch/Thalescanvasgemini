@@ -20,6 +20,7 @@ import { toast } from 'sonner';
 import { useStore } from '../store';
 import { deepLinkSyncService } from '../services/service.deepLinkSync';
 import { PlannerSyncDiff } from '../components/planner/PlannerSyncDiff';
+import { useAuth } from '../contexts/AuthContext';
 
 import { Button } from '@/components/ui/button';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from '@/components/ui/card';
@@ -34,6 +35,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 
 export default function CanvasPages() {
+  const { user } = useAuth();
   const navigate = useNavigate();
   const { plannerData, canvasCourseIds, addLog, canvasApiToken } = useStore();
   
@@ -77,7 +79,8 @@ export default function CanvasPages() {
     addLog(`Initiating Deep Link Sync for ${week.weekId} to ${selectedSubject}...`);
 
     try {
-      const result = await deepLinkSyncService.executeTwoPassSync(currentCourseId, week);
+      if (!user) return;
+      const result = await deepLinkSyncService.executeTwoPassSync(currentCourseId, week, user.uid);
       
       if (result.success) {
         setSyncedWeeks(prev => new Set(prev).add(week.weekId));
@@ -107,7 +110,8 @@ export default function CanvasPages() {
     try {
       for (const week of (plannerData || [])) {
         setSyncingWeek(week.weekId);
-        await deepLinkSyncService.executeTwoPassSync(currentCourseId, week);
+        if (!user) break;
+        await deepLinkSyncService.executeTwoPassSync(currentCourseId, week, user.uid);
         setSyncedWeeks(prev => new Set(prev).add(week.weekId));
         successCount++;
       }

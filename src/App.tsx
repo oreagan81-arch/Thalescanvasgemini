@@ -1,3 +1,4 @@
+import { ThemeProvider } from './components/ThemeProvider';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { Toaster } from '@/components/ui/sonner';
@@ -127,37 +128,43 @@ export default function App() {
   }
 
   return (
-    <QueryClientProvider client={queryClient}>
-      <ConfigLoader />
-      <CalendarSynchronizer />
-      <AuthProvider>
-        <TooltipProvider>
-          <BrowserRouter>
-            <Routes>
-              <Route path="/login" element={<Login />} />
-              
-              <Route path="/" element={
-                <ProtectedRoute>
-                  <DashboardLayout />
-                </ProtectedRoute>
-              }>
-                <Route index element={<Dashboard />} />
-                <Route path="planner" element={<Planner />} />
-                <Route path="syllabus-mapper" element={<SyllabusMapper weekId={selectedWeek} />} />
-                <Route path="canvas-pages" element={<CanvasPages />} />
-                <Route path="assignments" element={<Assignments />} />
-                <Route path="announcements" element={<Announcements />} />
-                <Route path="newsletters" element={<NewsletterBuilder />} />
-                <Route path="command-center" element={<AnnouncementCommandCenter />} />
-                <Route path="resources" element={<Resources />} />
-                <Route path="settings" element={<Settings />} />
-                <Route path="templates" element={<Templates />} />
-              </Route>
-            </Routes>
-          </BrowserRouter>
-          <Toaster theme="dark" />
-        </TooltipProvider>
-      </AuthProvider>
-    </QueryClientProvider>
+    <ThemeProvider defaultTheme="medium" storageKey="vite-ui-theme">
+      <QueryClientProvider client={queryClient}>
+        <ConfigLoader />
+        <CalendarSynchronizer />
+        <AuthProvider>
+          <TooltipProvider>
+            <BrowserRouter>
+              <Routes>
+                <Route path="/login" element={<Login />} />
+                
+                <Route path="/" element={
+                  <ProtectedRoute>
+                    <DashboardLayout />
+                  </ProtectedRoute>
+                }>
+                  <Route index element={<Dashboard />} />
+                  <Route path="planner" element={<Planner />} />
+                  <Route path="syllabus-mapper" element={
+                    <ErrorBoundary>
+                      <SyllabusMapper weekId={selectedWeek} />
+                    </ErrorBoundary>
+                  } />
+                  <Route path="canvas-pages" element={<CanvasPages />} />
+                  <Route path="assignments" element={<Assignments />} />
+                  <Route path="announcements" element={<Announcements />} />
+                  <Route path="newsletters" element={<NewsletterBuilder />} />
+                  <Route path="command-center" element={<AnnouncementCommandCenter />} />
+                  <Route path="resources" element={<Resources />} />
+                  <Route path="settings" element={<Settings />} />
+                  <Route path="templates" element={<Templates />} />
+                </Route>
+              </Routes>
+            </BrowserRouter>
+            <Toaster theme="dark" />
+          </TooltipProvider>
+        </AuthProvider>
+      </QueryClientProvider>
+    </ThemeProvider>
   );
 }

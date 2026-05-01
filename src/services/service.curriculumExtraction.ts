@@ -107,8 +107,33 @@ export const curriculumExtractionService = {
 
       let rawData = JSON.parse(text) as ExtractedWeek[];
 
+      // Merging Rule: If Reading and Spelling coexist for the same weekId, merge them.
+      const mergedData: ExtractedWeek[] = [];
+      const weekSubjectMap: Record<string, ExtractedWeek> = {};
+
+      rawData.forEach(item => {
+        const key = `${item.weekId}_${item.subject === 'Reading' || item.subject === 'Spelling' ? 'Literacy' : item.subject}`;
+        
+        if (weekSubjectMap[key]) {
+          const existing = weekSubjectMap[key];
+          // If merging Reading/Spelling
+          if ((existing.subject === 'Reading' && item.subject === 'Spelling') || 
+              (existing.subject === 'Spelling' && item.subject === 'Reading')) {
+            existing.topic = `Reading: ${existing.topic}<br/>Spelling: ${item.topic}`;
+            existing.subject = 'Reading & Spelling';
+            existing.assignments = [...existing.assignments, ...item.assignments];
+          } else {
+             // Basic fallback for other duplicate subjects
+             existing.assignments = [...existing.assignments, ...item.assignments];
+          }
+        } else {
+          weekSubjectMap[key] = { ...item };
+          mergedData.push(weekSubjectMap[key]);
+        }
+      });
+
       // Apply the Silent Auditor (Rules Engine) to sanitize vendor names
-      const sanitizedData = rawData.map((week) => ({
+      const sanitizedData = mergedData.map((week) => ({
         ...week,
         topic: rulesEngine.silentAuditor(week.topic),
         assignments: week.assignments.map((a) => ({

@@ -61,12 +61,14 @@ export function PlannerSnowDay() {
 
   return (
     <Dialog open={isOpen} onOpenChange={setIsOpen}>
-      <DialogTrigger asChild>
-        <Button variant="outline" className="bg-blue-500/10 border-blue-500/20 text-blue-500 hover:bg-blue-500/20">
-          <Snowflake className="w-4 h-4 mr-2" />
-          Snow Day Shift
-        </Button>
-      </DialogTrigger>
+      <DialogTrigger
+        render={
+          <Button variant="outline" className="bg-blue-500/10 border-blue-500/20 text-blue-500 hover:bg-blue-500/20">
+            <Snowflake className="w-4 h-4 mr-2" />
+            Snow Day Shift
+          </Button>
+        }
+      />
       
       <DialogContent className="sm:max-w-[425px] bg-[#0d0d10] border-white/10 text-slate-100">
         <DialogHeader>
@@ -83,12 +85,12 @@ export function PlannerSnowDay() {
           <div className="space-y-2">
             <Label className="text-xs uppercase font-black tracking-widest text-slate-500">Date of Missed School Day</Label>
             <Popover>
-              <PopoverTrigger asChild>
+              <PopoverTrigger render={
                 <Button variant="outline" className="w-full justify-start text-left bg-black/20 border-white/10 text-slate-200">
                   <CalendarIcon className="w-4 h-4 mr-2" />
                   {targetDate ? format(targetDate, 'PPP') : 'Pick a date'}
                 </Button>
-              </PopoverTrigger>
+              } />
               <PopoverContent className="w-auto p-0 bg-[#0d0d10] border-white/10" align="start">
                 <Calendar
                   mode="single"

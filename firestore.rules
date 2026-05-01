@@ -1,25 +1,59 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    function isAuthenticated() { return request.auth != null; }
     
-    // User profile and private settings
+    // --- Global Helpers ---
+    function isSignedIn() { return request.auth != null; }
+    function isValidId(id) { return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$'); }
+    function isOwner(userId) { return isSignedIn() && request.auth.uid == userId; }
+
+    // --- Default Deny ---
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // --- /users ---
     match /users/{userId} {
-      allow read, write: if isAuthenticated() && request.auth.uid == userId;
-      match /{allSubcollections=**} {
-        allow read, write: if isAuthenticated() && request.auth.uid == userId;
-      }
+      allow get, list: if isOwner(userId);
+      allow create: if isOwner(userId); // Basic registration
+      allow update: if isOwner(userId) && request.resource.data.keys().hasOnly(['lastLogin']);
+    }
+
+    // --- /weeks, /planner_rows, /resources, /announcements, /deployments, /settings, /canvas_pages, /assignments ---
+    // Enforce userId based ownership for general collections that seem to be scoped by userId or global
+    match /planner_rows/{rowId} {
+      allow read: if isSignedIn(); // Broad read for planner data
+      allow create: if isSignedIn();
+      allow update, delete: if isSignedIn() && resource.data.userId == request.auth.uid;
+    }
+
+    match /assignments/{assignmentId} {
+      allow read: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid;
+      allow update, delete: if isSignedIn() && resource.data.userId == request.auth.uid;
     }
 
     match /settings/{userId} {
-      allow read, write: if isAuthenticated() && request.auth.uid == userId;
+      allow read, write: if isOwner(userId);
     }
-    
-    // Global collections mapped by userId field for data ownership
-    match /{collectionName}/{docId} {
-      allow read, write: if isAuthenticated() && 
-        (resource == null || resource.data.userId == request.auth.uid) &&
-        (request.resource == null || request.resource.data.userId == request.auth.uid);
+
+    // --- New Managed Collections ---
+    match /deployLogs/{logId} {
+      allow read, write: if isSignedIn();
+    }
+
+    match /contentMapRegistry/{mapId} {
+      allow read, write: if isSignedIn();
+    }
+
+    match /learningRules/{ruleId} {
+      allow read, write: if isSignedIn();
+    }
+
+    // General fallback for other collections
+    match /{collection}/{docId} {
+      allow read: if isSignedIn();
+      allow write: if isSignedIn() && (resource == null || resource.data.userId == request.auth.uid);
     }
   }
 }

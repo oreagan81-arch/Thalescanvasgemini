@@ -21,6 +21,38 @@ export interface WeeklyPlan {
   aiAuditorWarnings: string[];
 }
 
+export async function suggestAssignments(lesson: string, subject: string): Promise<string[]> {
+  const PROMPT = `
+  You are an expert curriculum assistant for Thales Academy, Grade 4A.
+  Given the following subject and lesson, suggest 3-4 appropriate homework assignments.
+  Keep descriptions brief, aligned with a rigorous classical education, and do NOT include vendor names (e.g., Saxon, Shurley).
+  
+  Subject: ${subject}
+  Lesson: ${lesson}
+  `;
+  
+  const schemaProperties = {
+    assignments: {
+      type: Type.ARRAY,
+      items: { type: Type.STRING },
+      description: "List of 3-4 appropriate homework assignments"
+    }
+  };
+  const requiredFields = ["assignments"];
+
+  try {
+    const result = await geminiHelper.generateStructuredJSON<{ assignments: string[] }>(
+      PROMPT,
+      schemaProperties,
+      requiredFields
+    );
+    return result.assignments || [];
+  } catch (error) {
+    console.error("Failed to suggest assignments", error);
+    return [];
+  }
+}
+
 /**
  * Advanced Reasoning Engine for processing raw pacing guide text into a structured week plan.
  */

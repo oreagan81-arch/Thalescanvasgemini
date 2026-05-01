@@ -27,6 +27,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
 import { useDashboardLogic } from '../hooks/hook.useDashboardLogic';
+import { HelpDialog } from '../components/HelpDialog';
 
 export function DashboardLayout() {
   const { logOut } = useAuth();
@@ -193,15 +194,18 @@ export function DashboardLayout() {
         </div>
 
         <div className="p-3 border-t border-white/10 shrink-0 lg:p-6 bg-black/20">
-          <Button 
-            variant="ghost" 
-            size="icon"
-            onClick={logOut} 
-            className="w-10 h-10 lg:w-full flex lg:justify-start lg:px-3 text-slate-400 hover:text-white hover:bg-white/5 rounded-md"
-          >
-            <LogOut className="h-[18px] w-[18px]" />
-            <span className="ml-3 hidden lg:block text-sm font-medium">Terminate Session</span>
-          </Button>
+          <div className="flex flex-col gap-1">
+            <HelpDialog />
+            <Button 
+              variant="ghost" 
+              size="icon"
+              onClick={logOut} 
+              className="w-10 h-10 lg:w-full flex lg:justify-start lg:px-3 text-slate-400 hover:text-white hover:bg-white/5 rounded-md"
+            >
+              <LogOut className="h-[18px] w-[18px]" />
+              <span className="ml-3 hidden lg:block text-sm font-medium">Terminate Session</span>
+            </Button>
+          </div>
         </div>
       </nav>
 

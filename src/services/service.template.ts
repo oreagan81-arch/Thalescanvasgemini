@@ -24,8 +24,7 @@ export const templateService = {
   subscribeTemplates: (userId: string, callback: (templates: Template[]) => void) => {
     const q = query(
       collection(db, 'templates'),
-      where('createdBy', '==', userId),
-      orderBy('createdAt', 'desc')
+      where('createdBy', '==', userId)
     );
 
     return onSnapshot(q, (snapshot) => {
@@ -33,6 +32,12 @@ export const templateService = {
         id: doc.id,
         ...doc.data()
       })) as Template[];
+      
+      templates.sort((a, b) => {
+        const timeA = a.createdAt?.seconds || 0;
+        const timeB = b.createdAt?.seconds || 0;
+        return timeB - timeA;
+      });
       callback(templates);
     });
   },

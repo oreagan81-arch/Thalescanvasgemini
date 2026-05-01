@@ -76,18 +76,22 @@ class CanvasConcurrencyQueue {
       if (!response.ok) {
         // Catch Rate Limiting (403 Cost Exceeded / 429 Too Many Requests)
         if ((response.status === 403 || response.status === 429) && item.retries < this.MAX_RETRIES) {
-          console.warn(`[Canvas API] Rate Limit Hit on ${item.endpoint}. Queuing retry ${item.retries + 1}/${this.MAX_RETRIES}...`);
+          const waitTime = Math.pow(2, item.retries) * 1000; // 1s, 2s, 4s
+          console.warn(`[Canvas API] Rate Limit Hit (429) on ${item.endpoint}. Retrying in ${waitTime}ms... (${item.retries + 1}/${this.MAX_RETRIES})`);
           
           item.retries++;
           
+          // Use the calculated exponential backoff, or respect Retry-After if it's longer
+          const retryAfter = response.headers.get('Retry-After');
+          const backoffDelay = retryAfter ? Math.max(parseInt(retryAfter) * 1000, waitTime) : waitTime;
+
           // Backoff WITHOUT holding an activeRequest slot
-          // We let the current "worker" finish, and re-enqueue the item with a delay
           setTimeout(() => {
             this.queue.unshift(item);
             this.processQueue();
-          }, 2000 * item.retries);
+          }, backoffDelay);
           
-          return; // Finally block will release the slot for other waitings
+          return;
         } else {
           const errorText = await response.text();
           let parsedError;
@@ -120,6 +124,21 @@ export const canvasApiService = {
    * Universal Request Wrapper: Handles CORS Proxying and Auth via the Queue
    */
   async secureRequest(endpoint: string, options: RequestInit = {}) {
+    const isWrite = options.method && ['POST', 'PUT', 'DELETE'].includes(options.method.toUpperCase());
+    const isDev = import.meta.env.VITE_SYSTEM_MODE === 'DEV';
+
+    if (isWrite && isDev) {
+      console.warn(`[Canvas API] DEV MODE: Canvas Write Aborted (${options.method} ${endpoint})`);
+      return { 
+        id: "mock_id",
+        name: "Mocked Response",
+        success: true, 
+        ok: true, 
+        status: 200,
+        mocked: true 
+      };
+    }
+
     return canvasQueue.enqueue(endpoint, options);
   },
 
@@ -159,17 +178,31 @@ export const canvasApiService = {
   },
 
   async createOrUpdatePage(courseId: string, data: { title: string, body: string, url?: string }) {
-    const method = data.url ? 'PUT' : 'POST';
     const slug = data.url;
+    let method = slug ? 'PUT' : 'POST';
     const url = slug
       ? `https://thalesacademy.instructure.com/api/v1/courses/${courseId}/pages/${slug}`
       : `https://thalesacademy.instructure.com/api/v1/courses/${courseId}/pages`;
     
+    // Front Page Guard: Prevent accidental unpublishing of the Course Home Page
+    let additionalPayload: any = {};
+    if (slug && method === 'PUT') {
+      try {
+        const existingPage = await this.get(url);
+        if (existingPage && (existingPage.front_page === true || existingPage.wiki_page?.front_page === true)) {
+          console.warn(`[Canvas Guard] Front Page detected at ${slug}. Enforcing 'published=true' status.`);
+          additionalPayload.published = true;
+        }
+      } catch (err) {
+        console.error("Canvas Guard: Failed to verify front_page status, proceeding with caution.", err);
+      }
+    }
+
     // Remove url from payload to prevent Canvas error
     const { url: _, ...wikiData } = data;
     return this.secureRequest(url, {
       method,
-      body: JSON.stringify({ wiki_page: wikiData })
+      body: JSON.stringify({ wiki_page: { ...wikiData, ...additionalPayload } })
     });
   },
 

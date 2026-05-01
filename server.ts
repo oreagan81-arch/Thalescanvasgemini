@@ -153,7 +153,7 @@ async function startServer() {
       let fetchUrl = url;
       if (url.includes('/edit')) {
         fetchUrl = url.replace(/\/edit.*$/, '/export?format=csv');
-      } else if (!url.includes('/export')) {
+      } else if (!url.includes('/export') && !url.includes('output=csv')) {
         fetchUrl = url.endsWith('/') ? `${url}export?format=csv` : `${url}/export?format=csv`;
       }
 

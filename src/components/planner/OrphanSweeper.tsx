@@ -123,12 +123,14 @@ export function OrphanSweeper({ courseId, courseName = "Course" }: OrphanSweeper
 
   return (
     <Dialog open={isOpen} onOpenChange={setIsOpen}>
-      <DialogTrigger asChild>
-        <Button variant="outline" className="border-amber-500/20 text-amber-500 hover:bg-amber-500/10">
-          <Trash2 className="w-4 h-4 mr-2" />
-          Sweep {courseName}
-        </Button>
-      </DialogTrigger>
+      <DialogTrigger
+        render={
+          <Button variant="outline" className="border-amber-500/20 text-amber-500 hover:bg-amber-500/10">
+            <Trash2 className="w-4 h-4 mr-2" />
+            Sweep {courseName}
+          </Button>
+        }
+      />
 
       <DialogContent className="max-w-2xl bg-[#0d0d10] border-white/10 text-slate-100 p-0 overflow-hidden">
         <Tabs defaultValue="sweeper" className="w-full">

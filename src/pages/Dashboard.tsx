@@ -94,7 +94,7 @@ export function Dashboard() {
               >
                 Dismiss
               </Button>
-              <Button asChild size="sm" className="bg-blue-600 hover:bg-blue-700 text-white h-7 text-[10px] font-bold">
+              <Button size="sm" className="bg-blue-600 hover:bg-blue-700 text-white h-7 text-[10px] font-bold">
                 <Link to="/announcements" className="flex items-center gap-1">Review Draft <ArrowRight className="w-3 h-3" /></Link>
               </Button>
             </div>

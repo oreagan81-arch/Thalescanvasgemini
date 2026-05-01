@@ -54,10 +54,14 @@ export function useDashboardLogic() {
     try {
       addLog("Initializing GitHub Handshake...");
       const res = await fetch("/api/auth/github/url");
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({}));
+        throw new Error(errorData.error || "Failed to fetch GitHub URL");
+      }
       const { url } = await res.json();
       window.open(url, 'github_oauth', 'width=600,height=700');
-    } catch (err) {
-      toast.error("Failed to initialize handshake");
+    } catch (err: any) {
+      toast.error(err.message || "Failed to initialize handshake");
     }
   };
 

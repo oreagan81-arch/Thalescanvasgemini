@@ -7,9 +7,11 @@ import {
   getDocs, 
   writeBatch, 
   doc, 
-  serverTimestamp 
+  serverTimestamp,
+  setDoc
 } from 'firebase/firestore';
 import { db } from '../lib/firebase';
+import { useThalesStore } from '../store';
 
 export interface PacingUpdate {
   weekId: string;
@@ -71,6 +73,37 @@ export const syncService = {
     } catch (err) {
       console.error("Sync Protocol Failure:", err);
       throw err;
+    }
+  },
+
+  syncCourseData: async (courseId: string, assignmentsData: any[]) => {
+    try {
+      console.log(`Starting sync for course: ${courseId}`);
+      
+      const assignmentsRef = collection(db, "assignments");
+      const q = query(assignmentsRef, where("courseId", "==", courseId));
+      const existingDocs = await getDocs(q);
+      
+      const existingIds = new Set();
+      existingDocs.forEach(doc => existingIds.add(doc.data().canvasId));
+
+      let addedCount = 0;
+      for (const item of assignmentsData) {
+        if (!existingIds.has(item.canvasId)) {
+          await setDoc(doc(assignmentsRef, item.id), {
+            ...item,
+            courseId,
+            syncedAt: serverTimestamp()
+          });
+          addedCount++;
+        }
+      }
+      
+      console.log(`Sync completed. Added ${addedCount} new assignments.`);
+      return { success: true, addedCount };
+    } catch (error) {
+      console.error("Sync failed:", error);
+      throw error;
     }
   }
 };

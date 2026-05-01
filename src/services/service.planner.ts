@@ -30,6 +30,7 @@ export interface PlannerRow {
   homework: string;
   reminder: string;
   notes: string;
+  order: number;
   deployStatus: 'Draft' | 'Ready' | 'Deployed' | 'Failed';
   canvasId?: string; // Track Canvas page/assignment ID
   canvasUrl?: string; // Track Canvas direct link
@@ -62,7 +63,7 @@ export const plannerService = {
       const sortedRows = rows.sort((a, b) => {
         const dayDiff = DAYS_ORDER.indexOf(a.day) - DAYS_ORDER.indexOf(b.day);
         if (dayDiff !== 0) return dayDiff;
-        return a.subject.localeCompare(b.subject);
+        return (a.order || 0) - (b.order || 0);
       });
 
       callback(sortedRows);
@@ -79,6 +80,7 @@ export const plannerService = {
       return await addDoc(collection(db, COLLECTION_NAME), {
         ...row,
         userId,
+        order: row.order || Date.now(),
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp()
       });

@@ -17,10 +17,25 @@ export const calendarSync = {
     const firstMonday = startOfWeek(newStart, { weekStartsOn: 1 });
 
     return oldData.map((week, index) => {
-      // Calculate current quarter/week (assuming 9 weeks per quarter)
-      const totalWeeks = index;
-      const quarter = Math.floor(totalWeeks / 9) + 1;
-      const weekInQuarter = (totalWeeks % 9) + 1;
+      // Calculate current quarter/week (9, 9, 9, 10 weeks)
+      const totalWeeks = index + 1;
+      let quarter = 1;
+      let weekInQuarter = totalWeeks;
+
+      if (totalWeeks >= 28) {
+        quarter = 4;
+        weekInQuarter = totalWeeks - 27;
+      } else if (totalWeeks >= 19) {
+        quarter = 3;
+        weekInQuarter = totalWeeks - 18;
+      } else if (totalWeeks >= 10) {
+        quarter = 2;
+        weekInQuarter = totalWeeks - 9;
+      } else {
+        quarter = 1;
+        weekInQuarter = totalWeeks;
+      }
+      
       const newWeekId = `Q${quarter}_W${weekInQuarter}`;
 
       // Calculate the new Monday for this specific week (for logging or future date fields)

@@ -1,6 +1,8 @@
 import { canvasApiService } from './canvasApiService';
 import { PacingWeek } from './service.pacingImport';
 import { rulesEngine } from '../lib/thales/rulesEngine';
+import { resourceService } from './service.resource';
+import { resourceResolver } from '../lib/resourceResolver';
 
 export const deepLinkSyncService = {
   /**
@@ -8,8 +10,9 @@ export const deepLinkSyncService = {
    * Pass 1: Create/Update Assignments and capture URLs.
    * Pass 2: Inject those URLs into the Page HTML and publish.
    */
-  async executeTwoPassSync(courseId: string, weekData: PacingWeek) {
+  async executeTwoPassSync(courseId: string, weekData: PacingWeek, userId: string) {
     try {
+      const allResources = await resourceService.getAllResources(userId);
       const assignmentLinks: Record<string, string> = {};
       
       // We combine majorTests and any other assignments if they exist
@@ -70,11 +73,15 @@ export const deepLinkSyncService = {
         actionItemsHtml += `<li>No specific assignments scheduled for this week.</li>`;
       }
       actionItemsHtml += `</ul>`;
+      
+      // Inject Resources
+      const resourcesHtml = resourceResolver.resolveResourcesAsHtml(allResources, weekData, allAssignments);
+      let finalBodyHtml = curriculumHtml + actionItemsHtml + `<h3>Resources</h3><ul>${resourcesHtml}</ul>`;
 
       // FRIDAY RULE: Brief note if applicable
       const fridayNote = `<p style="font-size: 0.9em; color: #666; font-style: italic; margin-top: 15px;">Note: Friday sessions focus strictly on assessments and review.</p>`;
 
-      const finalBodyHtml = curriculumHtml + actionItemsHtml + fridayNote;
+      finalBodyHtml += fridayNote;
       
       // Apply Cidi Labs (DesignPlus) wrappers and headers via Rules Engine
       const headerHtml = `<h2 class="dp-header">${pageTitle}</h2>`;

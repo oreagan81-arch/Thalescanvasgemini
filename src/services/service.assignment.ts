@@ -138,7 +138,7 @@ export const assignmentService = {
     let writesQueued = 0;
 
     try {
-      // Sync Efficiency: Cache existing rowIds for the current week to prevent redundant writes
+      // Sync Efficiency: Cache existing rowIds and Assignment titles/subjects for the current week to prevent redundant writes
       const existingQ = query(
         collection(db, COLLECTION_NAME), 
         where('userId', '==', userId),
@@ -146,40 +146,74 @@ export const assignmentService = {
       );
       const existingSnap = await getDocs(existingQ);
       const existingRowIds = new Set(existingSnap.docs.map(d => d.data().rowId));
+      const existingAssignmentKeys = new Set(existingSnap.docs.map(d => `${d.data().title}_${d.data().subject}`));
+
+      // 1. Resolve Academic Context for Date calculation
+      const [qStr, wStr] = weekId.split('_');
+      const quarter = parseInt(qStr.substring(1));
+      const weekNum = parseInt(wStr.substring(1));
+      const { calendarService } = await import('./service.calendar');
+      const weekDates = calendarService.getDatesForContext(quarter, weekNum);
 
       for (const row of plannerRows) {
-        const rowId = row.id || row.rowId;
-        if (!row.lessonTitle || existingRowIds.has(rowId)) continue;
+        // --- Thales Rules Engine: Explicit Blockers ---
+        // 1. History/Science: No assignments ever
+        if (row.subject === 'Science' || row.subject === 'History') continue;
         
-        let targetCourseId = (COURSE_IDS as any)[row.subject] || COURSE_IDS.Homeroom;
-        if (courseIdsMap && courseIdsMap[row.subject]) {
-          targetCourseId = parseInt(courseIdsMap[row.subject]);
-        } else if (courseIdsMap && courseIdsMap['Homeroom']) {
-          targetCourseId = parseInt(courseIdsMap['Homeroom']);
-        }
+        // 2. Language Arts: Only CP (Classroom Practice) or Test allowed
+        if (row.subject === 'Language Arts' && !(row.type === 'CP' || row.type === 'Test')) continue;
+
+        // 3. Friday Rule: No homework, only Tests allowed
+        if (row.day === 'Friday' && row.type !== 'Test') continue;
+        // ----------------------------------------------
+
+        const rowId = row.id || row.rowId;
         
         // Use Thales deterministic rules to generate assignments
         const generated = rulesEngine.generateAssignments(row);
-        
+
         for (const gen of generated) {
+          // Robust deduplication: check both rowId and title/subject
+          if (!row.lessonTitle || existingRowIds.has(rowId) || existingAssignmentKeys.has(`${gen.title}_${row.subject}`)) continue;
+          
+          let targetCourseId = (COURSE_IDS as any)[row.subject] || COURSE_IDS.Homeroom;
+          if (courseIdsMap && courseIdsMap[row.subject]) {
+            targetCourseId = parseInt(courseIdsMap[row.subject]);
+          } else if (courseIdsMap && courseIdsMap['Homeroom']) {
+            targetCourseId = parseInt(courseIdsMap['Homeroom']);
+          }
+
+          // Calculate Dynamic Due Date
+          const dayInfo = weekDates.find(d => d.label === row.day);
+          let dueDate: any = serverTimestamp();
+          if (dayInfo) {
+            const baseDate = new Date(dayInfo.iso + "T12:00:00");
+            if (gen.dueDateOffset) {
+              baseDate.setDate(baseDate.getDate() + gen.dueDateOffset);
+            }
+            dueDate = baseDate;
+          }
+          
           const newRef = doc(collection(db, COLLECTION_NAME));
           batch.set(newRef, {
             userId,
             weekId,
             rowId,
             subject: row.subject,
-            title: gen.title,
+            title: rulesEngine.silentAuditor(gen.title),
             courseId: targetCourseId,
             type: gen.isStudyGuide ? 'Assignment' : 'Assignment', // Distinguish more if needed
             points: gen.points,
             gradingType: gen.gradingType,
             omitFromFinalGrade: gen.omitFromFinalGrade,
-            dueDate: serverTimestamp(),
+            dueDate,
             status: 'Pending',
             createdAt: serverTimestamp(),
             updatedAt: serverTimestamp(),
           });
           writesQueued++;
+          // Register the new key to prevent duplicates within this same batch
+          existingAssignmentKeys.add(`${gen.title}_${row.subject}`);
         }
 
         // Batch limit is 500

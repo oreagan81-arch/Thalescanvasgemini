@@ -21,6 +21,7 @@ export interface GeneratedAssignment {
   isStudyGuide?: boolean;
   gradingType?: 'pass_fail' | 'percent' | 'letter_grade' | 'points';
   omitFromFinalGrade?: boolean;
+  dueDateOffset?: number; // Days to offset from record's date (e.g. -1 for day before)
 }
 
 export const rulesEngine = {
@@ -32,31 +33,39 @@ export const rulesEngine = {
     const assignments: GeneratedAssignment[] = [];
 
     if (row.subject === 'Math') {
+      // Brevity Mandate: Strip 'Saxon Math'
+      const cleanTitle = row.lessonTitle.replace(/Saxon Math/gi, '').trim();
+
       if (row.type === 'Test') {
+        // Triple Sequence: Written Test (100), Fact Test (100), Study Guide (0, day before)
         assignments.push({ 
-          title: `Math Test ${row.lessonNum}`, 
+          title: `Math Written Test ${row.lessonNum}`, 
           points: 100, 
           published: false,
           gradingType: 'percent'
         });
         assignments.push({ 
-          title: `Fact Test ${row.lessonNum}`, 
+          title: `Math Fact Test ${row.lessonNum}`, 
           points: 100, 
           published: false,
           gradingType: 'percent'
         });
         assignments.push({ 
-          title: `Study Guide ${row.lessonNum}`, 
-          points: 100, // Reverting to 100 as per user "all points are 100" but we can check
+          title: `Math Study Guide ${row.lessonNum}`, 
+          points: 0, 
           published: false, 
           isStudyGuide: true,
           gradingType: 'pass_fail',
-          omitFromFinalGrade: true
+          omitFromFinalGrade: true,
+          dueDateOffset: -1 // Scheduled for the day before
         });
       } else {
         if (row.day !== 'Friday') {
+          const lessonNum = rulesEngine.safeParseNumber(row.lessonNum);
+          const hwSuffix = lessonNum % 2 === 0 ? "Evens HW" : "Odds HW";
+          
           assignments.push({ 
-            title: `Math Homework (Evens/Odds) ${row.lessonNum}`, 
+            title: `Math ${row.lessonNum} ${hwSuffix}`, 
             points: 100, 
             published: false,
             gradingType: 'percent'
