@@ -129,85 +129,95 @@ export const runWeekValidator = neverCrash(async (request: CallableRequest<any>)
     return { valid: true, errors: [] };
 });
 
+/**
+ * 1. Admin Notifications: Friday Deploy Sync
+ * Triggers an email summary to the administrator detailing Canvas deployment success/failures.
+ */
 export const fridayDeploySync = neverCrash(async (request: CallableRequest<any>) => {
-    const { weekId, summary } = request.data;
-    console.log(`Executing Friday Deploy Sync for ${weekId}`);
-    
-    // Perform sync operations...
-    const results = summary || { Math: 'Success', Reading: 'Success', History: 'Success' };
-
-    // Send Admin Notification via Resend
-    const resendApiKey = process.env.RESEND_API_KEY;
+    const { successList = [], failureList = [], weekId } = request.data;
     const adminEmail = process.env.ADMIN_EMAIL;
+    const resendApiKey = process.env.RESEND_API_KEY;
 
-    if (resendApiKey && adminEmail) {
-        const resend = new Resend(resendApiKey);
-        try {
-            await resend.emails.send({
-                from: 'Thales OS <notifications@thales-os.app>',
-                to: adminEmail,
-                subject: `🚀 Friday Sync Report: Week ${weekId}`,
-                html: `
-                    <h2>Sync Summary for Week ${weekId}</h2>
-                    <ul>
-                        ${Object.entries(results).map(([subject, status]) => `<li><strong>${subject}:</strong> ${status}</li>`).join('')}
-                    </ul>
-                    <p>Deployment timestamp: ${new Date().toLocaleString()}</p>
-                `
-            });
-            console.log("Sync notification sent successfully.");
-        } catch (err) {
-            console.error("Failed to send Resend email:", err);
-        }
+    if (!adminEmail || !resendApiKey) {
+        throw new HttpsError("failed-precondition", "Admin email or Resend API key missing.");
     }
 
-    return { success: true, results };
+    const htmlBody = `
+      <h2>Friday Deploy Sync Report</h2>
+      <p>The automated Canvas pacing sync has completed for week ${weekId || 'unknown'}.</p>
+      <h3 style="color: green;">✅ Successful Subjects:</h3>
+      <ul>${successList.map((s: string) => `<li>${s}</li>`).join('') || '<li>None</li>'}</ul>
+      <h3 style="color: red;">❌ Failed Subjects:</h3>
+      <ul>${failureList.map((f: string) => `<li>${f}</li>`).join('') || '<li>None</li>'}</ul>
+    `;
+
+    const resend = new Resend(resendApiKey);
+    await resend.emails.send({
+      from: 'onboarding@resend.dev',
+      to: adminEmail,
+      subject: `Canvas Sync: Friday Deployment Report - Week ${weekId || 'N/A'}`,
+      html: htmlBody
+    });
+
+    return { success: true, message: "Deployment report sent successfully." };
 });
 
+/**
+ * 2. Dynamic Sheet Mapping
+ * Scans column A of the pacing guide for dates and saves their row mappings into Firestore.
+ * Implements chunked batch writes to handle large sheets.
+ */
 export const importSheetData = neverCrash(async (request: CallableRequest<any>) => {
-    const { payload, mode } = request.data;
-    console.log(`Importing sheet data, mode: ${mode}`);
-
-    // Dynamic Sheet Mapping
-    // payload should be raw CSV/Table data where first row or col contains dates
-    const rows = payload as string[][];
-    const mapping: Record<string, number> = {};
-
-    // Scan Column A for Date headers (Simplified logic: look for date-like strings)
-    rows.forEach((row, index) => {
-        const firstCell = row[0];
-        if (firstCell && (firstCell.includes('/') || firstCell.includes('-')) && /\d/.test(firstCell)) {
-            mapping[firstCell] = index;
+    const { spreadsheetData, mode } = request.data;
+    
+    if (!Array.isArray(spreadsheetData)) {
+        throw new HttpsError("invalid-argument", "spreadsheetData is required and must be an array.");
+    }
+    
+    // If 'rescan' is passed, we rebuild the contentMapRegistry
+    if (mode === "rescan") {
+        const registryRef = db.collection("contentMapRegistry");
+        
+        // 1. Delete existing docs in chunks of 500
+        let snapshot = await registryRef.limit(500).get();
+        while (!snapshot.empty) {
+            const batch = db.batch();
+            snapshot.docs.forEach(doc => batch.delete(doc.ref));
+            await batch.commit();
+            snapshot = await registryRef.limit(500).get();
         }
-    });
 
-    const registryRef = db.collection('contentMapRegistry');
+        // 2. Identify and save new mappings in chunks of 500
+        const mappings: { date: string, row: number }[] = [];
+        spreadsheetData.forEach((row: any[], index: number) => {
+            const colA = row[0];
+            if (typeof colA === 'string' && /^[A-Z][a-z]{2,8}\s\d{1,2}$/.test(colA.trim())) {
+                mappings.push({
+                    date: colA.trim(),
+                    row: index + 1
+                });
+            }
+        });
 
-    if (mode === 'rescan') {
-        console.log("Rescan mode: Cleaning existing registry...");
-        const snapshot = await registryRef.get();
-        const batch = db.batch();
-        snapshot.docs.forEach(doc => batch.delete(doc.ref));
-        await batch.commit();
+        // 3. Commit new mappings in batches of 500
+        for (let i = 0; i < mappings.length; i += 500) {
+            const chunk = mappings.slice(i, i + 500);
+            const batch = db.batch();
+            chunk.forEach(m => {
+                const docRef = registryRef.doc();
+                batch.set(docRef, {
+                    dateString: m.date,
+                    rowNumber: m.row,
+                    updatedAt: admin.firestore.FieldValue.serverTimestamp()
+                });
+            });
+            await batch.commit();
+        }
+        
+        return { success: true, message: `Successfully rescanned sheet and created ${mappings.length} dynamic mappings.` };
     }
 
-    // Write new mapping to Firestore
-    const writeBatch = db.batch();
-    Object.entries(mapping).forEach(([date, rowNum]) => {
-        const docRef = registryRef.doc(date.replace(/\//g, '-'));
-        writeBatch.set(docRef, {
-            date,
-            rowNumber: rowNum,
-            updatedAt: admin.firestore.FieldValue.serverTimestamp()
-        });
-    });
-    await writeBatch.commit();
-
-    return { 
-        success: true, 
-        mappedCount: Object.keys(mapping).length,
-        mapping 
-    };
+    return { success: true, message: "Standard import executed without rescan." };
 });
 
 /**

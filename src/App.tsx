@@ -47,32 +47,6 @@ const CalendarSynchronizer = () => {
   return null;
 };
 
-const ConfigLoader = () => {
-  const { canvasApiToken, setSettings } = useStore();
-
-  useEffect(() => {
-    const pullConfig = async () => {
-      if (!canvasApiToken) {
-        try {
-          const response = await fetch('/api/config/canvas-token');
-          if (response.ok) {
-            const { token } = await response.json();
-            if (token) {
-              setSettings({ canvasApiToken: token });
-              console.log('[SYSTEM] Canvas API Token pulled from server environment.');
-            }
-          }
-        } catch (err) {
-          // Fail silently, user can still enter it manually in Settings
-        }
-      }
-    };
-    pullConfig();
-  }, [canvasApiToken, setSettings]);
-
-  return null;
-};
-
 const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
   const { user, isAllowedUser, logOut } = useAuth();
   
@@ -130,7 +104,6 @@ export default function App() {
   return (
     <ThemeProvider defaultTheme="medium" storageKey="vite-ui-theme">
       <QueryClientProvider client={queryClient}>
-        <ConfigLoader />
         <CalendarSynchronizer />
         <AuthProvider>
           <TooltipProvider>

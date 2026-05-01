@@ -98,46 +98,79 @@ async function startServer() {
     });
   });
 
-  // Pull Secrets Endpoint
-  app.get("/api/config/canvas-token", (req, res) => {
-    const token = process.env.CANVAS_API_TOKEN || process.env.VITE_CANVAS_API_TOKEN;
-    if (token) {
-      res.json({ token });
-    } else {
-      res.status(404).json({ error: "Canvas API Token not found in server environment" });
-    }
-  });
+  // SECURITY FIX: Removed the /api/config/canvas-token endpoint.
+  // The frontend should NEVER see or handle the master token.
 
-  // Canvas API Proxy (Avoids CORS issues)
-  app.all("/api/canvas/*", async (req, res) => {
-    const authHeader = req.headers.authorization;
-    const clientToken = authHeader?.startsWith('Bearer ') ? authHeader.substring(7) : null;
-    const token = clientToken || process.env.CANVAS_API_TOKEN || process.env.VITE_CANVAS_API_TOKEN;
+  /**
+   * Robust Canvas Request Wrapper
+   * Implements exponential backoff for 429 Rate Limiting and 5xx errors
+   */
+  async function canvasRequest(
+    method: string,
+    canvasPath: string, 
+    body: any = null,
+    query: string = "",
+    retries = 3
+  ): Promise<any> {
+    const CANVAS_BASE_URL = process.env.CANVAS_BASE_URL || "https://thalesacademy.instructure.com/api/v1";
+    const CANVAS_TOKEN = process.env.CANVAS_API_TOKEN || process.env.VITE_CANVAS_API_TOKEN;
+
+    if (!CANVAS_TOKEN) {
+      throw new Error("CANVAS_API_TOKEN not configured in environment");
+    }
+
+    const url = `${CANVAS_BASE_URL}/${canvasPath.replace(/^\//, '')}${query ? '?' + query : ''}`;
     
-    if (!token) {
-      return res.status(401).json({ error: "Canvas API Token missing. Please provide it in the Authorization header or server environment." });
-    }
-
-    const canvasPath = req.params[0];
-    const query = new URLSearchParams(req.query as any).toString();
-    const url = `https://thalesacademy.instructure.com/api/v1/${canvasPath}${query ? '?' + query : ''}`;
+    const headers = {
+      'Authorization': `Bearer ${CANVAS_TOKEN}`,
+      'Content-Type': 'application/json',
+      'Accept': 'application/json'
+    };
 
     try {
       const response = await fetch(url, {
-        method: req.method,
-        headers: {
-          "Authorization": `Bearer ${token}`,
-          "Content-Type": "application/json",
-          "Accept": "application/json",
-        },
-        body: ["POST", "PUT", "PATCH"].includes(req.method) ? JSON.stringify(req.body) : undefined,
+        method,
+        headers,
+        body: ["POST", "PUT", "PATCH"].includes(method) ? JSON.stringify(body) : undefined,
       });
+      
+      // Handle Rate Limiting (429) or Server Errors (5xx)
+      if ((response.status === 429 || response.status >= 500) && retries > 0) {
+        const waitTime = Math.pow(2, 4 - retries) * 1000;
+        console.warn(`[Canvas] ${response.status} detected. Retrying in ${waitTime}ms... (${retries} retries left)`);
+        await new Promise(res => setTimeout(res, waitTime));
+        return canvasRequest(method, canvasPath, body, query, retries - 1);
+      }
 
-      const data = await response.json();
-      res.status(response.status).json(data);
-    } catch (error) {
-      console.error("Canvas Proxy Error:", error);
-      res.status(500).json({ error: "Failed to fetch from Canvas via proxy" });
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`Canvas API Error (${response.status}): ${errorText}`);
+      }
+
+      // Some Canvas responses might be empty for successful DELETE or PUT
+      if (response.status === 204) return { success: true };
+      
+      return await response.json();
+    } catch (error: any) {
+      if (retries > 0 && !error.message.includes('401') && !error.message.includes('403')) {
+        return canvasRequest(method, canvasPath, body, query, retries - 1);
+      }
+      throw error;
+    }
+  }
+
+  // Canvas API Proxy (Avoids CORS issues and secures token)
+  app.all("/api/canvas/*", async (req, res) => {
+    const canvasPath = req.params[0];
+    const query = new URLSearchParams(req.query as any).toString();
+
+    try {
+      const data = await canvasRequest(req.method, canvasPath, req.body, query);
+      res.json(data);
+    } catch (error: any) {
+      console.error("Canvas Proxy Error:", error.message);
+      const status = error.message.includes('401') ? 401 : error.message.includes('403') ? 403 : 500;
+      res.status(status).json({ error: error.message });
     }
   });
 

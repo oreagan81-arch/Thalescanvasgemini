@@ -50,11 +50,6 @@ class CanvasConcurrencyQueue {
     this.activeRequests++;
 
     try {
-      const { canvasApiToken } = useStore.getState();
-      if (!canvasApiToken) {
-        throw new Error("CANVAS_API_TOKEN_MISSING: Please configure your Canvas API Token in Settings.");
-      }
-
       // Enforce the baseline delay to prevent sudden request bursts
       await this.delay(this.DELAY_MS);
 
@@ -64,7 +59,6 @@ class CanvasConcurrencyQueue {
 
       const headers = {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${canvasApiToken}`,
         ...item.options.headers,
       };
 

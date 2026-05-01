@@ -55,8 +55,10 @@ export const PlannerHeader: React.FC<PlannerHeaderProps> = React.memo(({
           Sync Google Sheet
         </Button>
 
-        <Button onClick={onSyncResources} disabled={syncing} variant="outline" className="border-teal-500/30 bg-teal-500/5 text-teal-400 hover:bg-teal-500/10">
-          <CloudDownload className="w-4 h-4 mr-2" />
+        <Button 
+          onClick={onSyncResources} 
+          className="bg-[#0065a7] hover:bg-blue-700 text-white"
+        >
           Grab Resources
         </Button>
 

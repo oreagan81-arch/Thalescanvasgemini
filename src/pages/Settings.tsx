@@ -11,7 +11,6 @@ export function Settings() {
   const store = useThalesStore();
   
   const [geminiKey, setGeminiKey] = useState(store.geminiApiKey);
-  const [canvasToken, setCanvasToken] = useState(store.canvasApiToken);
   const [pacingUrl, setPacingUrl] = useState(store.pacingGuideUrl);
   const [startDate, setStartDate] = useState(store.schoolStartDate || '');
   
@@ -27,7 +26,6 @@ export function Settings() {
   const handleSave = () => {
     store.setSettings({
       geminiApiKey: geminiKey,
-      canvasApiToken: canvasToken,
       pacingGuideUrl: pacingUrl,
       schoolStartDate: startDate,
       canvasCourseIds: courseIds
@@ -74,16 +72,6 @@ export function Settings() {
               value={geminiKey} 
               onChange={e => setGeminiKey(e.target.value)} 
               placeholder="AIzaSy..." 
-              className="bg-black/40 border-white/10 text-white"
-            />
-          </div>
-          <div className="space-y-2">
-            <label className="text-sm font-medium text-slate-300">Canvas LMS Token</label>
-            <Input 
-              type="password" 
-              value={canvasToken} 
-              onChange={e => setCanvasToken(e.target.value)} 
-              placeholder="7~abcdef..." 
               className="bg-black/40 border-white/10 text-white"
             />
           </div>

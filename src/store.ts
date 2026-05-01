@@ -168,9 +168,17 @@ export const useStore = create<ThalesState>()(
       name: 'thales-os-storage',
       version: 1, 
       migrate: (persistedState: any, version: number) => {
-        if (version === undefined || version === 0) {
-          console.warn('Persisted state version outdated or missing. Wiping cache.');
-          return {}; // Returning empty object for initial state reset
+        if (version === 0 || !version) {
+          console.warn("Old state detected, clearing cache to prevent crashes.");
+          return {
+            sidebarOpen: true,
+            theme: 'dark',
+            selectedWeek: 'Q1_W1',
+            selectedQuarter: 1,
+            plannerData: null,
+            lastSyncedAt: null,
+            hasHydrated: false,
+          };
         }
         return persistedState;
       },

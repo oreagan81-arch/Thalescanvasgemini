@@ -3,6 +3,7 @@ import { assignmentService, Assignment } from './service.assignment';
 import { canvasPageService, CanvasPage } from './service.canvasPage';
 import { rulesEngine } from '../lib/thales/rulesEngine';
 import { useStore } from '../store';
+import { syncEngine } from './service.syncEngine';
 import { db } from '../lib/firebase';
 import { doc, updateDoc, serverTimestamp } from 'firebase/firestore';
 
@@ -28,7 +29,10 @@ export const canvasSyncService = {
     for (const assign of assignments) {
       if (assign.status === 'Deployed' && assign.canvasId) continue;
 
-      const canvasAssign = await canvasApiService.createOrUpdateAssignment(
+      // Unique identifier for this assignment instance to prevent duplicates
+      const externalId = assign.rowId ? `row_${assign.rowId}_${assign.title}` : `assign_${assign.id}`;
+
+      const canvasAssign = await syncEngine.syncAssignment(
         assign.courseId.toString(),
         {
           name: assign.title,
@@ -38,7 +42,7 @@ export const canvasSyncService = {
           omit_from_final_grade: assign.omitFromFinalGrade || false,
           submission_types: ['online_upload']
         },
-        assign.canvasId
+        externalId
       );
 
       // Update local assignment
@@ -65,11 +69,12 @@ export const canvasSyncService = {
     // Apply Cidi Labs Sanitization
     finalHtml = rulesEngine.sanitizeForCanvas(finalHtml, `Weekly Agenda - ${weekId}`);
 
-    const canvasPage = await canvasApiService.createOrUpdatePage(homeroomId, {
+    const externalPageId = `page_${weekId}_${homeroomId}`;
+    const canvasPage = await syncEngine.syncPage(homeroomId, {
       title: `Weekly Agenda: ${weekId.replace('_', ' ')}`,
       body: finalHtml,
       url: page.canvasPageId // Use existing slug if present
-    });
+    }, externalPageId);
 
     results.pageUrl = canvasPage.html_url;
     await canvasPageService.updateStatus(page.id!, 'Deployed', canvasPage.url);
@@ -99,7 +104,9 @@ export const canvasSyncService = {
    * Deploys a single assignment to Canvas.
    */
   deploySingleAssignment: async (assign: Assignment) => {
-    const canvasAssign = await canvasApiService.createOrUpdateAssignment(
+    const externalId = assign.rowId ? `row_${assign.rowId}_${assign.title}` : `assign_${assign.id}`;
+    
+    const canvasAssign = await syncEngine.syncAssignment(
       assign.courseId.toString(),
       {
         name: assign.title,
@@ -109,7 +116,7 @@ export const canvasSyncService = {
         omit_from_final_grade: assign.omitFromFinalGrade || false,
         submission_types: ['online_upload']
       },
-      assign.canvasId
+      externalId
     );
 
     // Update local assignment

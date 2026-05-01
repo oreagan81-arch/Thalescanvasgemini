@@ -87,6 +87,40 @@ export function applyBrevity(subject: string, lessonNum: string | null, inClass:
   return inClass || '';
 }
 
+export function mergeSubjectData(primarySubject: any, secondarySubject: any) {
+  const mergedData = { ...primarySubject };
+
+  // Update Reading/Spelling merge logic to NOT overwrite lessons
+  if (secondarySubject.lesson) {
+    if (primarySubject.lesson) {
+      // Concatenate specific strings like "Lesson 102" using a <br/> tag
+      mergedData.lesson = `${primarySubject.lesson}<br/>${secondarySubject.lesson}`;
+    } else {
+      mergedData.lesson = secondarySubject.lesson;
+    }
+  }
+
+  // Merge resources array securely without dropping data and deduplicating
+  if (secondarySubject.resources && secondarySubject.resources.length > 0) {
+    const existingResources = primarySubject.resources || [];
+    
+    // Create map for fast lookup by title to deduplicate
+    const resourceMap = new Map();
+    
+    // Fill with existing
+    existingResources.forEach((res: any) => resourceMap.set(res.title, res));
+    
+    // Add new ones
+    secondarySubject.resources.forEach((res: any) => {
+      resourceMap.set(res.title, res);
+    });
+    
+    mergedData.resources = Array.from(resourceMap.values());
+  }
+
+  return mergedData;
+}
+
 export async function computeContentHash(
   subject: string,
   day: string,

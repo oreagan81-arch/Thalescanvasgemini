@@ -113,11 +113,11 @@ export const PlannerCard: React.FC<PlannerCardProps> = React.memo(({ row, onUpda
             </div>
             <div className="flex flex-wrap gap-1.5">
               {fields.resources.map((res, index) => (
-                <Badge key={index} variant="secondary" className="pl-2 pr-1 py-0.5 flex items-center gap-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 border-0">
+                <Badge key={index} className="pl-3 pr-2 py-1 flex items-center gap-2 bg-[#00c0a5] hover:bg-[#00c0a5]/90 text-white border-0 shadow-sm transition-all text-xs">
                   <span className="max-w-[120px] truncate">{res || 'New Resource'}</span>
                   <button 
                     onClick={() => removeResource(index)} 
-                    className="p-0.5 hover:bg-slate-300 rounded-full transition-colors"
+                    className="p-0.5 hover:bg-white/20 rounded-full transition-colors"
                   >
                     <X className="w-3 h-3" />
                   </button>

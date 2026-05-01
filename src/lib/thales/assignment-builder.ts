@@ -1,12 +1,11 @@
-import type { AppConfig } from '../config'; // I assume config is here or reachable
-import type { PacingCell } from '@/store.ts'; // Changed to store.ts after I found PacingCell isn't in a store subfolder? Wait, let's re-verify.
+import { useStore } from '../../store';
 import { generateAssignmentTitle, resolveAssignmentGroup } from './assignment-logic';
 import { isFridayHomeworkBlocked, FRIDAY_SKIP_REASON } from './friday-rules';
 
-// Re-check PacingCell
-// PacingCell is usually in pacingImport or defined globally. PacingWeek is in pacingImport.
-// Let's assume PacingCell is in pacingImport since that defines the week.
-import { PacingWeek } from '../../services/service.pacingImport'; 
+export interface AppConfig {
+  assignmentPrefixes: Record<string, string>;
+  courseIds: Record<string, string>;
+}
 
 export interface PacingCell {
     subject: string;
@@ -80,7 +79,7 @@ export async function buildAssignment(
     points: groupInfo.points,
     gradingType: groupInfo.gradingType,
     assignmentGroup: groupInfo.groupName,
-    courseId,
+    courseId: parseInt(courseId),
     dueDate,
     omitFromFinal: groupInfo.omitFromFinal || type === 'Study Guide',
     contentHash: 'hash-placeholder', // Implement your hash logic here
@@ -89,24 +88,25 @@ export async function buildAssignment(
 }
 
 /** Expand a Math row into multiple assignments (Written + Fact + Study Guide) */
-export function expandMathRow(
+export async function expandMathRow(
   dayIndex: number,
   cell: PacingCell,
   options: { config: AppConfig; contentMap: ContentMapEntry[]; weekDates?: string[] },
-): BuiltAssignment[] {
+): Promise<BuiltAssignment[]> {
   const { config, contentMap } = options;
   const assignments: BuiltAssignment[] = [];
 
   // 1. Main Written Test
-  assignments.push(buildAssignment({ ...cell, type: 'Test' }, dayIndex, config, contentMap));
+  assignments.push(await buildAssignment({ ...cell, type: 'Test' }, dayIndex, config, contentMap));
 
   // 2. Fact Test (same day)
-  assignments.push(buildAssignment({ ...cell, type: 'Fact Test' }, dayIndex, config, contentMap, { isGas: true }));
+  assignments.push(await buildAssignment({ ...cell, type: 'Fact Test' }, dayIndex, config, contentMap, { isGas: true }));
 
   // 3. Study Guide (day before)
   if (dayIndex > 0) {
-    assignments.push(buildAssignment({ ...cell, type: 'Study Guide' }, dayIndex - 1, config, contentMap, { isGas: true, dayOffset: -1 }));
+    assignments.push(await buildAssignment({ ...cell, type: 'Study Guide' }, dayIndex - 1, config, contentMap, { isGas: true, dayOffset: -1 }));
   }
 
   return assignments;
 }
+
