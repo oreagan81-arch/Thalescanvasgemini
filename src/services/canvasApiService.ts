@@ -5,7 +5,6 @@ interface QueueItem {
   options: RequestInit;
   resolve: (value: any) => void;
   reject: (reason: any) => void;
-  retries: number;
 }
 
 class CanvasConcurrencyQueue {
@@ -15,7 +14,6 @@ class CanvasConcurrencyQueue {
   // Enterprise-grade tuning based on Canvas LMS API limits
   private readonly MAX_CONCURRENT = 3;
   private readonly DELAY_MS = 300;
-  private readonly MAX_RETRIES = 3;
 
   private delay(ms: number) {
     return new Promise((resolve) => setTimeout(resolve, ms));
@@ -31,8 +29,7 @@ class CanvasConcurrencyQueue {
         endpoint,
         options,
         resolve,
-        reject,
-        retries: 0
+        reject
       });
       this.processQueue();
     });
@@ -68,30 +65,12 @@ class CanvasConcurrencyQueue {
       });
 
       if (!response.ok) {
-        // Catch Rate Limiting (403 Cost Exceeded / 429 Too Many Requests)
-        if ((response.status === 403 || response.status === 429) && item.retries < this.MAX_RETRIES) {
-          const waitTime = Math.pow(2, item.retries) * 1000; // 1s, 2s, 4s
-          console.warn(`[Canvas API] Rate Limit Hit (429) on ${item.endpoint}. Retrying in ${waitTime}ms... (${item.retries + 1}/${this.MAX_RETRIES})`);
-          
-          item.retries++;
-          
-          // Use the calculated exponential backoff, or respect Retry-After if it's longer
-          const retryAfter = response.headers.get('Retry-After');
-          const backoffDelay = retryAfter ? Math.max(parseInt(retryAfter) * 1000, waitTime) : waitTime;
-
-          // Backoff WITHOUT holding an activeRequest slot
-          setTimeout(() => {
-            this.queue.unshift(item);
-            this.processQueue();
-          }, backoffDelay);
-          
-          return;
-        } else {
-          const errorText = await response.text();
-          let parsedError;
-          try { parsedError = JSON.parse(errorText); } catch { parsedError = { message: errorText }; }
-          throw new Error(parsedError.message || `Canvas API Error ${response.status}`);
-        }
+        // We removed the frontend retry logic because the backend proxy 
+        // now handles 429 exponential backoffs automatically.
+        const errorText = await response.text();
+        let parsedError;
+        try { parsedError = JSON.parse(errorText); } catch { parsedError = { message: errorText }; }
+        throw new Error(parsedError.message || `Canvas Proxy Error ${response.status}`);
       }
 
       // Canvas sometimes returns empty 200/204 responses (especially on DELETE or PUT)

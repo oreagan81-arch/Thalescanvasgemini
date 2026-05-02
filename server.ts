@@ -113,10 +113,11 @@ async function startServer() {
     retries = 3
   ): Promise<any> {
     const CANVAS_BASE_URL = process.env.CANVAS_BASE_URL || "https://thalesacademy.instructure.com/api/v1";
-    const CANVAS_TOKEN = process.env.CANVAS_API_TOKEN || process.env.VITE_CANVAS_API_TOKEN;
+    // STRICT SECURITY: Never use VITE_ prefix for this token.
+    const CANVAS_TOKEN = process.env.CANVAS_API_TOKEN; 
 
     if (!CANVAS_TOKEN) {
-      throw new Error("CANVAS_API_TOKEN not configured in environment");
+      throw new Error("CANVAS_API_TOKEN not configured in environment. Do not use VITE_ prefix.");
     }
 
     const url = `${CANVAS_BASE_URL}/${canvasPath.replace(/^\//, '')}${query ? '?' + query : ''}`;
