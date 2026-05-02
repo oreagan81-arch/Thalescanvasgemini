@@ -156,10 +156,6 @@ export const rulesEngine = {
     if (type === 'reading') {
       const exactReadingData = parseReadingWeek(identifier);
       const benchmark = exactReadingData.fluencyBenchmark;
-      const expectedGoal = `${benchmark.wpm} words per minute (WPM) with ${benchmark.errorLimit} or fewer errors`;
-      if (!contentLower.includes(expectedGoal.toLowerCase()) && !contentLower.includes(`${benchmark.wpm} wpm`)) {
-          errors.push(`Reading Checkout Rule Violation: Missing "${expectedGoal}" fluency goal.`);
-      }
       if (!contentLower.includes(benchmark.label.toLowerCase())) errors.push(`Missing fluency benchmark: "${benchmark.label}"`);
       return { isValid: errors.length === 0, errors };
     }

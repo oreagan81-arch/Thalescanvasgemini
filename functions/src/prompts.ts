@@ -7,7 +7,38 @@
  */
 
 export const PROMPT_VERSIONS = {
-  PLANNER_EXTRACTION: "1.1.0"
+  PLANNER_EXTRACTION: "2.1.0",
+  CORE: "2.1.0"
+};
+
+export const PROMPT_VERSION = "v2.1";
+
+export const PLAN_ITEM_SCHEMA = {
+  type: "object",
+  properties: {
+    id: { type: "string" },
+    subject: { type: "string" },
+    lessonTitle: { type: "string" },
+    description: { type: "string" },
+    objectives: { type: "array", items: { type: "string" } },
+    homework: { type: "string" },
+    resources: { type: "array", items: { type: "string" } }
+  },
+  required: ["lessonTitle"]
+};
+
+/**
+ * Schema for Thales Lesson Plan Enrichment (Bulk Lessons)
+ */
+export const ENRICHMENT_SCHEMA = {
+  type: "object",
+  properties: {
+    enrichedItems: {
+      type: "array",
+      items: PLAN_ITEM_SCHEMA
+    }
+  },
+  required: ["enrichedItems"]
 };
 
 /**
@@ -17,29 +48,24 @@ export const PLANNER_SCHEMA = {
   type: "object",
   properties: {
     course: { type: "string", description: "The name of the course or subject" },
+    quarter: { type: "number", description: "Academic Quarter (1-4)" },
     week: { type: "string", description: "The week identifier (e.g., '28', 'Week 4')" },
+    reminders: { type: "array", items: { type: "string" }, description: "Assessments and important dates" },
+    resources: { type: "array", items: { type: "string" }, description: "Links to worksheets, textbooks, and study guides" },
     days: {
       type: "array",
       items: {
         type: "object",
         properties: {
-          id: { type: "string", description: "The original document ID if preserving a lesson" },
+          id: { type: "string", description: "The original document ID" },
           day: { 
             type: "string", 
             enum: ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"],
             description: "Target school day"
           },
-          lesson: { type: "string", description: "The core instructional topic" },
-          objectives: { 
-            type: "array", 
-            items: { type: "string" },
-            description: "Key learning goals"
-          },
-          homework: { type: "string", description: "After-school assignments" },
-          resources: { 
-            type: "array", 
-            items: { type: "string" },
-            description: "Links or files mentioned"
+          lessons: {
+            type: "array",
+            items: PLAN_ITEM_SCHEMA
           }
         },
         required: ["day"]
@@ -55,12 +81,15 @@ export const PLANNER_SCHEMA = {
  */
 export const SYSTEM_CONSTRAINTS = `
   SYSTEM MANDATES:
-  - NEVER hallucinate lesson content.
-  - NEVER change provided structure or identifiers.
-  - ALWAYS follow schema exactly.
-  - OUTPUT must be deterministic and reusable.
-  - DO NOT include explanations, preambles, or conversational text.
-  - YOU ARE A SYSTEM COMPONENT, NOT A CHATBOT.
+  - YOU ARE THE THALES ACADEMIC OS ORCHESTRATOR.
+  - ROLE: Transform structured pacing data into pixel-perfect Canvas content.
+  - BRANDING: Thales Academy at Flowers Plantation Guidelines.
+  - BREVITY MANDATE (v14.0):
+    - Strip all vendor names (Saxon, Shurley, etc.).
+    - Condense titles (e.g., "Math Lesson 78" -> "Lesson 78").
+    - "At Home" detail is minimal (e.g., "Lesson 78 Evens").
+  - ZERO HALLUCINATION: Only use provided curriculum data.
+  - OUTPUT FORMAT: Strict JSON only. No prose.
 `;
 
 /**
@@ -122,20 +151,32 @@ export const getPlannerPrompt = (extractedData: string, existingState?: string, 
 `;
 
 /**
- * AGENT 3: GENERATOR
- * Role: Enriches the plan with objectives, homework, and resources.
+ * AGENT 3: GENERATOR (ENRICHER)
+ * Role: Enriches specific lessons for a SINGLE DAY with academic detail.
+ * Optimized for scale: only processes the items for one day.
  */
-export const getGeneratorPrompt = (planStructure: string) => `
-  AGENT ROLE: Content Generator
-  TASK: Enrich the structural week plan with detailed educational content.
-  ${SYSTEM_CONSTRAINTS}
+export const getEnrichmentPrompt = (day: string, itemsToEnrich: string, courseInfo: string) => `
+  You are an expert Academic Content Producer for Thales Academy.
   
-  PLAN_STRUCTURE: ${planStructure}
-
+  CONTEXT:
+  Course/Subject: ${courseInfo}
+  Day of Week: ${day}
+  Academic Standards: Thales Academy Grade 4A Curriculum Guidelines.
+  
+  TASK: Generate high-quality pedagogical content for the following lessons scheduled for ${day}.
+  
+  INPUT_ITEMS:
+  ${itemsToEnrich}
+  
   INSTRUCTIONS:
-  1. Generate pedagogical objectives based on Thales Grade 4A standards.
-  2. Create relevant homework assignments.
-  3. Suggest instructional resources (Worksheets, Slides, etc.).
+  1. For each item in INPUT_ITEMS, generate:
+     - 'description': A concise 2-3 sentence overview of the lesson content.
+     - 'objectives': 2-3 specific learning targets (observable actions).
+     - 'homework': A relevant follow-up assignment if appropriate.
+  2. Maintain the provided 'id' if present.
+  3. Ensure tone is professional and age-appropriate for 4th Grade.
+  
+  ${SYSTEM_CONSTRAINTS}
 `;
 
 /**
@@ -153,7 +194,6 @@ export const getValidatorPrompt = (finalContent: string) => `
   - Idempotency: No duplicates.
   - Brevity: NO VENDOR NAMES (Saxon, Shurley).
   - Friday: Assessments only, no "In Class" instructional blocks.
-  - 100 WPM Fluency Goal for Reading.
   
   OUTPUT: Return the FINAL JSON structure. Fix any violations internally before outputting.
 `;
@@ -162,7 +202,7 @@ export const getValidatorPrompt = (finalContent: string) => `
  * System Prompt for Planner Extraction
  */
 export const getPlannerSystemPrompt = (rawText: string, existingState?: string, historicalContext?: string) => `
-  SYSTEM ROLE: Thales Academy Academic OS Orchestrator (v${PROMPT_VERSIONS.PLANNER_EXTRACTION})
+  SYSTEM ROLE: Thales Academy Academic OS Orchestrator (${PROMPT_VERSION})
   
   TASK: Extract curriculum data from the provided text into the mandated JSON structure.
   

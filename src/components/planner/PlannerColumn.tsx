@@ -3,7 +3,7 @@ import { DndContext, closestCenter, DragEndEvent } from '@dnd-kit/core';
 import { SortableContext, verticalListSortingStrategy, arrayMove } from '@dnd-kit/sortable';
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Plus } from 'lucide-react';
+import { Plus, Sparkles } from 'lucide-react';
 import { PlannerCard } from './PlannerCard';
 import { PlannerRow, plannerService } from '../../services/service.planner';
 
@@ -13,6 +13,7 @@ interface PlannerColumnProps {
   dateLabel?: string;
   onUpdate: (id: string, updates: Partial<PlannerRow>) => Promise<void>;
   onAddBlock: () => void;
+  onRegenerate?: () => void;
 }
 
 export const PlannerColumn: React.FC<PlannerColumnProps> = React.memo(({
@@ -21,6 +22,7 @@ export const PlannerColumn: React.FC<PlannerColumnProps> = React.memo(({
   dateLabel,
   onUpdate,
   onAddBlock,
+  onRegenerate,
 }) => {
 
   const handleDragEnd = async (event: DragEndEvent) => {
@@ -50,7 +52,20 @@ export const PlannerColumn: React.FC<PlannerColumnProps> = React.memo(({
             {dateLabel}
           </span>
         </div>
-        {day === 'Friday' && <Badge variant="outline" className="text-amber-500 border-amber-500/20 bg-amber-500/10 text-[10px] uppercase">Auto-Test Day</Badge>}
+        <div className="flex items-center gap-2">
+          {day === 'Friday' && <Badge variant="outline" className="text-amber-500 border-amber-500/20 bg-amber-500/10 text-[10px] uppercase">Auto-Test Day</Badge>}
+          {onRegenerate && (
+            <Button 
+              variant="ghost" 
+              size="icon" 
+              className="h-7 w-7 text-slate-500 hover:text-amber-500 hover:bg-amber-500/10 rounded-full"
+              onClick={onRegenerate}
+              title={`Regenerate ${day}`}
+            >
+              <Sparkles className="w-3.5 h-3.5" />
+            </Button>
+          )}
+        </div>
       </div>
       
       <DndContext collisionDetection={closestCenter} onDragEnd={handleDragEnd}>

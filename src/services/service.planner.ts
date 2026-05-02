@@ -151,7 +151,7 @@ export const plannerService = {
 
       // 3. Parse with Gemini
       const { pacingImportService } = await import('./service.pacingImport');
-      const pacingWeeks = await pacingImportService.parse(rawText, apiKey);
+      const pacingWeeks = pacingImportService.parse(rawText);
 
       // 4. Update the master store
       store.setPlannerData(pacingWeeks);

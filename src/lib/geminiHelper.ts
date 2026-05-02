@@ -31,10 +31,9 @@ SECURITY RULES:
 
 THALES ACADEMY GRADING & POSTING RULES:
 1. FRIDAY AGENDA RULE: Omit "In Class" instructional sections for Fridays. Focus exclusively on assessments and major due dates.
-2. READING CHECKOUT RULE: Always include the Fluency Goal: "100 words per minute (WPM) with 2 or fewer errors."
-3. BREVITY MANDATE: STRIP all vendor names (Saxon, Shurley, Story of the World) from student-facing titles.
-4. MERGED POSTINGS: Reading and Spelling must be posted together as one integrated block.
-5. BRANDING LOCKDOWN: You are strictly forbidden from changing the primary color away from the institutional #0065a7. You may only suggest layout changes, not color palette changes.
+2. BREVITY MANDATE: STRIP all vendor names (Saxon, Shurley, Story of the World) from student-facing titles.
+3. MERGED POSTINGS: Reading and Spelling must be posted together as one integrated block.
+4. BRANDING LOCKDOWN: You are strictly forbidden from changing the primary color away from the institutional #0065a7. You may only suggest layout changes, not color palette changes.
 `;
 
 /**
@@ -298,9 +297,8 @@ FORMATTING REQUIREMENTS:
 1. Use a clean, Thales Academy inspired design (Dark/Gold accents).
 2. Use a Table or Grid structure for Monday-Friday assignments.
 3. Friday Agenda Rule: Omit "In Class" instructional sections for Fridays. Focus on assessments.
-4. Reading Checkout Rule: Include Fluency Goal: "100 words per minute (WPM) with 2 or fewer errors."
-5. Brevity Mandate: STRIP all vendor names (Saxon, Shurley, etc).
-6. Return ONLY valid HTML fragments (no <html> or <body> tags, just a <div> container with class "dp-box").`;
+4. Brevity Mandate: STRIP all vendor names (Saxon, Shurley, etc).
+5. Return ONLY valid HTML fragments (no <html> or <body> tags, just a <div> container with class "dp-box").`;
 
   return await askGemini(prompt);
 }

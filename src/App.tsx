@@ -96,6 +96,18 @@ const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
 export default function App() {
   const selectedWeek = useStore(state => state.selectedWeek);
   const hasHydrated = useStore(state => state.hasHydrated);
+  const setHasHydrated = useStore(state => state.setHasHydrated);
+
+  useEffect(() => {
+    // Safety fallback: if hydration takes too long, force it so the UI isn't locked
+    const timeoutId = setTimeout(() => {
+      if (!hasHydrated) {
+        console.warn("[SYSTEM] Hydration timed out. Forcing UI boot...");
+        setHasHydrated(true);
+      }
+    }, 5000);
+    return () => clearTimeout(timeoutId);
+  }, [hasHydrated, setHasHydrated]);
 
   if (!hasHydrated) {
     return (

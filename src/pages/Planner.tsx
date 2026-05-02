@@ -5,6 +5,7 @@ import { toast } from 'sonner';
 import { useStore } from '../store';
 import { plannerService, PlannerRow } from '../services/service.planner';
 import { plannerAIService, AIPlannerResult } from '../services/plannerAIService'; 
+import { pacingImportService } from '../services/service.pacingImport';
 import { calendarService } from '../services/service.calendar';
 import { useAuth } from '../contexts/AuthContext';
 import { auth } from '../lib/firebase';
@@ -223,7 +224,25 @@ export default function Planner() {
       const proxyUrl = `/api/proxy/google-sheets?url=${encodeURIComponent(url)}`;
       const response = await fetch(proxyUrl);
       if (!response.ok) throw new Error("Failed to fetch Google Sheet");
-      const rawText = await response.text();
+      const csvText = await response.text();
+      const parsedWeeks = pacingImportService.parse(csvText);
+      
+      // Find the specific week data
+      const currentWeekData = parsedWeeks.find(w => w.weekId === week || `Week ${w.weekNumber}` === week);
+      
+      const payload = currentWeekData ? JSON.stringify({
+        course: "Thales Curriculum",
+        week: week,
+        days: currentWeekData.days.map((d, idx) => ({
+          day: ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'][idx] || 'Unknown',
+          lessons: [
+            { subject: 'Math', lessonTitle: d.mathLesson },
+            { subject: 'Reading', lessonTitle: d.readingWeek },
+            { subject: 'ELA', lessonTitle: d.elaChapter },
+            { subject: 'History/Science', lessonTitle: d.historyScience }
+          ]
+        }))
+      }) : csvText;
 
       // Collect existing state for diffing
       const existingState = rowsRef.current.map(r => ({
@@ -268,7 +287,7 @@ export default function Planner() {
         console.warn("Failed to fetch historical context, proceeding without memory.");
       }
 
-      const jobId = await plannerAIService.startParseTask(rawText, existingState, historicalContext);
+      const jobId = await plannerAIService.startParseTask(payload, existingState, historicalContext);
       setActiveJob(jobId);
     } catch (err) {
       console.error(err);
@@ -282,6 +301,23 @@ export default function Planner() {
     try {
       setSyncing(true);
       toast.info("Dispatching Command to Brain Queue...");
+
+      const parsedWeeks = pacingImportService.parse(text);
+      const currentWeekData = parsedWeeks.find(w => w.weekId === week || `Week ${w.weekNumber}` === week);
+      
+      const payload = currentWeekData ? JSON.stringify({
+        course: "Thales Curriculum",
+        week: week,
+        days: currentWeekData.days.map((d, idx) => ({
+          day: ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'][idx] || 'Unknown',
+          lessons: [
+            { subject: 'Math', lessonTitle: d.mathLesson },
+            { subject: 'Reading', lessonTitle: d.readingWeek },
+            { subject: 'ELA', lessonTitle: d.elaChapter },
+            { subject: 'History/Science', lessonTitle: d.historyScience }
+          ]
+        }))
+      }) : text;
 
       // Collect existing state for diffing
       const existingState = rowsRef.current.map(r => ({
@@ -325,7 +361,7 @@ export default function Planner() {
         console.warn("Failed to fetch historical context, proceeding without memory.");
       }
 
-      const jobId = await plannerAIService.startParseTask(text, existingState, historicalContext); 
+      const jobId = await plannerAIService.startParseTask(payload, existingState, historicalContext); 
       setActiveJob(jobId);
     } catch (err) {
       console.error(err);
@@ -334,6 +370,37 @@ export default function Planner() {
       setSyncing(false);
     }
   }, [week, setActiveJob]);
+
+  const handleRegenerateDay = useCallback(async (day: string) => {
+    try {
+      setSyncing(true);
+      toast.info(`Regenerating ${day} locally...`);
+
+      const store = useStore.getState();
+      const url = store.pacingGuideUrl;
+      const proxyUrl = `/api/proxy/google-sheets?url=${encodeURIComponent(url)}`;
+      const response = await fetch(proxyUrl);
+      if (!response.ok) throw new Error("Failed to fetch Google Sheet");
+      const csvText = await response.text();
+      
+      // Existing state for this day
+      const existingState = rowsRef.current.map(r => ({
+        id: r.id,
+        day: r.day,
+        lesson: r.lessonTitle,
+        homework: r.homework,
+        notes: r.notes
+      }));
+
+      const jobId = await plannerAIService.startParseTask(csvText, existingState, null, [day]);
+      setActiveJob(jobId);
+    } catch (err) {
+      console.error(err);
+      toast.error("Regeneration Failed");
+    } finally {
+      setSyncing(false);
+    }
+  }, [setActiveJob]);
 
   return (
     <div className="flex flex-col h-full space-y-6">
@@ -383,6 +450,7 @@ export default function Planner() {
                 dateLabel={weekDates.find(d => d.label === day)?.formatted}
                 onUpdate={handleUpdate}
                 onAddBlock={() => handleAddBlock(day)}
+                onRegenerate={() => handleRegenerateDay(day)}
               />
             ))}
           </div>

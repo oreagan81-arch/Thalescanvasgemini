@@ -8,10 +8,13 @@ import * as crypto from 'crypto';
 import { 
   PLANNER_SCHEMA, 
   PARSER_SCHEMA,
+  ENRICHMENT_SCHEMA,
   getParserPrompt, 
-  getGeneratorPrompt 
+  getEnrichmentPrompt,
+  PROMPT_VERSION
 } from './prompts';
 import { rulesEngine } from './rulesEngine';
+import { jobService, JobStatus } from './jobService';
 
 if (!admin.apps.length) {
   admin.initializeApp();
@@ -103,145 +106,189 @@ function generateHash(input: string): string {
   return crypto.createHash('sha256').update(input).digest('hex');
 }
 
-/**
- * Creates a job tracking document in Firestore with an optional specific ID for locking.
- */
-async function createJob(userId: string, type: string, customId?: string) {
-  const jobRef = customId ? db.collection('jobs').doc(customId) : db.collection('jobs').doc();
-  const jobId = jobRef.id;
-
-  // Check if job already exists and is active (Locking)
-  if (customId) {
-    const snap = await jobRef.get();
-    if (snap.exists()) {
-      const data = snap.data();
-      if (data?.status === 'pending' || data?.status === 'processing') {
-        console.log(`[LOCK] Ongoing job found: ${jobId}`);
-        return jobId;
-      }
-    }
-  }
-
-  await jobRef.set({
-    id: jobId,
-    userId,
-    type,
-    status: 'pending',
-    progress: 0,
-    createdAt: admin.firestore.FieldValue.serverTimestamp(),
-    updatedAt: admin.firestore.FieldValue.serverTimestamp()
-  });
-  return jobId;
-}
-
-/**
- * Updates an existing job's status.
- */
-async function updateJob(jobId: string, updates: any) {
-  await db.collection('jobs').doc(jobId).update({
-    ...updates,
-    updatedAt: admin.firestore.FieldValue.serverTimestamp()
-  });
-}
-
 export const startAiPlanGeneration = onCall(async (request: CallableRequest<any>) => {
   if (!request.auth) throw new HttpsError("unauthenticated", "Auth required.");
   
-  const { rawText, existingState, historicalContext, weekId, quarter } = request.data;
+  const { rawText, existingState, historicalContext, weekId, quarter, targetDays } = request.data;
   if (!rawText) throw new HttpsError("invalid-argument", "Raw text is required.");
 
   const userId = request.auth.uid;
-  // Hash includes context for idempotency
-  const inputHash = generateHash(`${userId}_${rawText}_${JSON.stringify(existingState || {})}_${JSON.stringify(historicalContext || {})}`);
+  // Hash includes context and targetDays for idempotency
+  const inputHash = generateHash(`${userId}_${rawText}_${JSON.stringify(existingState || {})}_${JSON.stringify(historicalContext || {})}_${JSON.stringify(targetDays || [])}`);
   
   // 1. CACHE CHECK
   const existingJobSnap = await db.collection('jobs').doc(inputHash).get();
   if (existingJobSnap.exists()) {
     const jobData = existingJobSnap.data();
-    if (jobData?.status === 'completed') {
+    if (jobData?.status === JobStatus.COMPLETED) {
       console.log(`[CACHE HIT] Returning existing result for ${inputHash}`);
-      return { jobId: inputHash, status: 'completed', result: jobData.result };
+      return { jobId: inputHash, status: JobStatus.COMPLETED, result: jobData.result };
     }
   }
 
-  const jobId = await createJob(userId, 'AI_PLAN', inputHash);
-
-  // Check if we should actually start it
-  const jobSnap = await db.collection('jobs').doc(jobId).get();
-  const jobData = jobSnap.data();
-  if (jobData?.status === 'processing') {
-    return { jobId, status: jobData.status };
-  }
+  const jobId = await jobService.getOrCreateJob(userId, 'AI_PLAN', request.data, { customId: inputHash });
 
   // Trigger processing asynchronously
   (async () => {
-    try {
-      await updateJob(jobId, { status: 'processing', progress: 10 });
+    await jobService.runProcessor(jobId, async (job) => {
+      const intermediate = job.intermediateState || {};
       
-      const stateStr = existingState ? JSON.stringify(existingState) : undefined;
-      const historyStr = historicalContext ? JSON.stringify(historicalContext) : undefined;
+      await jobService.updateProgress(jobId, { progress: 10 });
       
-      // AGENT 1: PARSER (Flash) - High volume extraction
-      await updateJob(jobId, { progress: 20 });
-      const parserModel = genAI.getGenerativeModel({ 
-        model: "gemini-1.5-flash",
-        generationConfig: { responseMimeType: "application/json", responseSchema: PARSER_SCHEMA as any }
-      });
-      const parserResult = await parserModel.generateContent(getParserPrompt(rawText));
-      const rawTextResult = parserResult.response.text();
-      const rawItems = JSON.parse(rawTextResult).items || [];
+      // AGENT 1 & 2: PARSER & AUDITOR (Deterministic) - No AI, just structure extraction
+      let structuralPlan = intermediate.structuralPlan;
+      if (!structuralPlan) {
+        await jobService.updateProgress(jobId, { progress: 20, intermediateState: { ...intermediate, step: 'PARSER' } });
+        
+        try {
+          if (rawText.trim().startsWith('{')) {
+            const json = JSON.parse(rawText);
+            structuralPlan = {
+              course: json.course || "General",
+              quarter: json.quarter || quarter || 1,
+              week: json.week || weekId || "1",
+              days: json.days || []
+            };
+          } else {
+            structuralPlan = rulesEngine.deterministicParse(rawText, quarter || 1, weekId);
+          }
+        } catch (err) {
+          console.warn("Deterministic parser error, using empty shell", err);
+          structuralPlan = { course: "Thales Curriculum", quarter: quarter || 1, weekId: weekId || "1", days: [] };
+        }
+
+        await jobService.updateProgress(jobId, { 
+          progress: 35, 
+          intermediateState: { ...intermediate, step: 'AUDIT', structuralPlan } 
+        });
+
+        await jobService.addLog(jobId, {
+          step: 'PARSER_DETERMINISTIC',
+          input: { rawTextLength: rawText.length },
+          output: { structuralPlan }
+        });
+      }
 
       // AGENT 2: PLANNER (JS Rules Engine) - Structural integrity
-      await updateJob(jobId, { progress: 40 });
-      let structuralPlan = rulesEngine.buildStructuralWeek(rawItems, weekId || 'Unknown', quarter || 1);
+      await jobService.updateProgress(jobId, { progress: 40 });
       
-      // Merge with existing state if present (Diffing)
-      if (existingState && existingState.days) {
+      if (existingState && existingState.days && !intermediate.structuralPlan) {
          structuralPlan.days = structuralPlan.days.map((day: any) => {
            const existingDay = existingState.days.find((d: any) => d.day === day.day);
            if (existingDay) {
-             // Preserve lessons that were already in the state if they still make sense
              return existingDay;
            }
            return day;
          });
       }
 
-      // AGENT 3: GENERATOR (Gemini Pro) - Deep academic content
-      await updateJob(jobId, { progress: 65 });
-      const generatorModel = genAI.getGenerativeModel({ 
-        model: "gemini-1.5-pro",
-        generationConfig: { responseMimeType: "application/json", responseSchema: PLANNER_SCHEMA as any }
-      });
-      const generatorResult = await generatorModel.generateContent(getGeneratorPrompt(JSON.stringify(structuralPlan)));
-      const enrichedText = generatorResult.response.text();
-      let enrichedPlan = JSON.parse(enrichedText);
+      // AGENT 3: GENERATOR (Gemini Pro) - Deep academic content (DAY-LEVEL GENERATION)
+      let enrichedPlan = intermediate.enrichedPlan || structuralPlan;
+      
+      if (!intermediate.enrichedPlan) {
+        await jobService.updateProgress(jobId, { progress: 65 });
+        const courseInfo = `${structuralPlan.course}, Quarter ${structuralPlan.quarter}, Week ${structuralPlan.week}`;
+        
+        for (let i = 0; i < structuralPlan.days.length; i++) {
+          const day = structuralPlan.days[i];
+          
+          const isTargeted = targetDays && targetDays.length > 0 ? targetDays.includes(day.day) : true;
+          if (!isTargeted) continue;
+
+          const lessonsToEnrich = day.lessons.filter((l: any) => {
+            const isForced = targetDays && targetDays.includes(day.day);
+            const isMissingContent = !(l.description && l.description.length > 20 && l.objectives && l.objectives.length > 0);
+            return isForced || isMissingContent;
+          }).map((l: any) => {
+            if (!l.id) l.id = generateHash(`${day.day}_${l.subject}_${l.lessonTitle}`);
+            return {
+              id: l.id,
+              subject: l.subject,
+              lessonTitle: l.lessonTitle,
+              currentDescription: l.description || "",
+              currentObjectives: l.objectives || []
+            };
+          });
+
+          if (lessonsToEnrich.length > 0) {
+            const dayProgress = 65 + Math.floor((i / structuralPlan.days.length) * 20);
+            await jobService.updateProgress(jobId, { progress: dayProgress });
+            
+            const enrichmentHash = generateHash(JSON.stringify(lessonsToEnrich));
+            const cacheSnap = await db.collection("generatedAgendas").doc(enrichmentHash).get();
+            
+            let enrichedItems = [];
+            if (cacheSnap.exists()) {
+              enrichedItems = cacheSnap.data()?.enrichedItems || [];
+            } else {
+              const generatorModel = genAI.getGenerativeModel({ 
+                model: "gemini-1.5-flash", 
+                generationConfig: { responseMimeType: "application/json", responseSchema: ENRICHMENT_SCHEMA as any }
+              });
+
+              try {
+                const generatorResult = await generatorModel.generateContent(getEnrichmentPrompt(day.day, JSON.stringify(lessonsToEnrich), courseInfo));
+                const enrichedResp = JSON.parse(generatorResult.response.text());
+                enrichedItems = enrichedResp.enrichedItems || [];
+                
+                await db.collection("generatedAgendas").doc(enrichmentHash).set({
+                  enrichedItems,
+                  createdAt: admin.firestore.FieldValue.serverTimestamp()
+                });
+
+                await jobService.addLog(jobId, {
+                  step: `AI_ENRICHMENT_${day.day.toUpperCase()}`,
+                  input: { lessonsCount: lessonsToEnrich.length },
+                  output: { enrichedItemsCount: enrichedItems.length }
+                });
+              } catch (err) {
+                console.error(`[DAY AI FAILURE] ${day.day}`, err);
+              }
+            }
+            
+             enrichedItems.forEach((item: any) => {
+              const lesson = day.lessons.find((l: any) => l.id === item.id || l.lessonTitle === item.lessonTitle);
+              if (lesson) {
+                lesson.description = item.description || lesson.description;
+                lesson.objectives = item.objectives || lesson.objectives;
+                lesson.homework = item.homework || lesson.homework;
+              }
+            });
+          }
+        }
+        
+        enrichedPlan = structuralPlan;
+        enrichedPlan = rulesEngine.applyHardRules(enrichedPlan);
+
+        await jobService.addLog(jobId, {
+          step: 'RULE_ENFORCER',
+          input: { planDayCount: enrichedPlan.days.length },
+          output: { status: 'rulesApplied' }
+        });
+
+        await jobService.updateProgress(jobId, { 
+          progress: 85, 
+          intermediateState: { ...intermediate, enrichedPlan } 
+        });
+      }
 
       // AGENT 4: VALIDATOR (JS Logic) - Rule enforcement
-      await updateJob(jobId, { progress: 90 });
-      const validation = rulesEngine.validateThalesRules(enrichedPlan as any);
+      await jobService.updateProgress(jobId, { progress: 90 });
+      let finalPlan = rulesEngine.validateAgenda(enrichedPlan);
+      const validation = rulesEngine.validateThalesRules(finalPlan);
       
-      // Deterministic sanitize (Vendor stripping)
-      enrichedPlan.days = enrichedPlan.days.map((day: any) => ({
+      finalPlan.days = finalPlan.days.map((day: any) => ({
         ...day,
         lessons: (day.lessons || []).map((lesson: any) => ({
           ...lesson,
-          lessonTitle: lesson.lessonTitle.replace(/Saxon|Shurley|SOTW/gi, 'Standard').trim(),
-          lesson: lesson.lesson?.replace(/Saxon|Shurley|SOTW/gi, 'Standard').trim(), // Handle both field names if varied
+          lessonTitle: (lesson.lessonTitle || "TBD").replace(/Saxon|Shurley|SOTW/gi, 'Standard').trim(),
+          lesson: lesson.lesson?.replace(/Saxon|Shurley|SOTW/gi, 'Standard').trim(), 
           objectives: (lesson.objectives || []).map((obj: string) => obj.replace(/Saxon|Shurley|SOTW/gi, 'Standard'))
         }))
       }));
 
-      await updateJob(jobId, { 
-        status: 'completed', 
-        progress: 100, 
-        result: enrichedPlan,
-        metadata: { validationErrors: validation.errors }
-      });
-    } catch (e: any) {
-      console.error("[MULTI-AGENT FLOW FAILED]", e);
-      await updateJob(jobId, { status: 'failed', error: e.message || "Unknown processing error" });
-    }
+      return finalPlan;
+    });
   })();
 
   return { jobId };
@@ -258,40 +305,67 @@ export const deployPages = onCall({ secrets: [canvasApiToken] }, async (request:
 
   const deployed = [];
   for (const page of pages) {
-    // Implement per-page lock to prevent duplicates
-    const lockKey = generateHash(`deploy_${page.courseId}_${page.title}`);
+    if (!page.id || !page.courseId) continue;
+
+    // Implement per-page lock to prevent concurrent duplicates
+    const lockKey = generateHash(`deploy_page_${page.id}`);
     const lockRef = db.collection('locks').doc(lockKey);
     
     try {
       await db.runTransaction(async (transaction) => {
         const snap = await transaction.get(lockRef);
-        if (snap.exists()) {
-          const data = snap.data()!;
-          const expiresAt = data.expiresAt.toDate();
-          if (expiresAt > new Date()) {
-            throw new Error(`Deployment lock already held for ${page.title}`);
-          }
+        if (snap.exists() && snap.data()!.expiresAt.toDate() > new Date()) {
+          throw new Error(`Deployment lock active for ${page.title}`);
         }
-        transaction.set(lockRef, {
-          courseId: page.courseId,
-          title: page.title,
-          expiresAt: admin.firestore.FieldValue.serverTimestamp() // We'll update this to a proper timestamp after the write
-        });
+        transaction.set(lockRef, { expiresAt: admin.firestore.FieldValue.serverTimestamp() });
       });
 
-      const result = await canvasRequest(`courses/${page.courseId}/pages`, 'POST', {
-        wiki_page: { title: page.title || 'Weekly Agenda', body: page.html, published: false }
-      }, token);
+      const pageRef = db.collection('canvas_pages').doc(page.id);
+      const pageSnap = await pageRef.get();
+      const existingData = pageSnap.exists() ? pageSnap.data() : null;
       
-      deployed.push(result.title);
+      const currentHash = generateHash(page.html);
+      let canvasId = existingData?.canvasId;
 
-      // Keep lock for 5 mins to prevent accidental double-clicks causing immediate duplicates
-      await lockRef.update({
-        expiresAt: new Date(Date.now() + 5 * 60 * 1000)
-      });
+      if (canvasId && existingData?.contentHash === currentHash) {
+        console.log(`[DEPLOY SKIP] Page "${page.title}" unchanged.`);
+        deployed.push(page.title);
+        continue;
+      }
+
+      let result;
+      if (canvasId) {
+        // UPDATE EXISTING PAGE
+        console.log(`[DEPLOY UPDATE] Updating Page "${page.title}" (Canvas ID: ${canvasId})`);
+        result = await canvasRequest(`courses/${page.courseId}/pages/${canvasId}`, 'PUT', {
+          wiki_page: { title: page.title, body: page.html }
+        }, token);
+      } else {
+        // CREATE NEW PAGE
+        console.log(`[DEPLOY CREATE] Creating Page "${page.title}"`);
+        result = await canvasRequest(`courses/${page.courseId}/pages`, 'POST', {
+          wiki_page: { title: page.title, body: page.html, published: false }
+        }, token);
+        canvasId = result.url.split('/').pop(); // Extract page URL component or use ID if returned differently
+      }
+      
+      await pageRef.set({
+        id: page.id,
+        courseId: page.courseId,
+        title: page.title,
+        htmlContent: page.html,
+        canvasId: canvasId || result.page_id || result.url?.split('/').pop(),
+        contentHash: currentHash,
+        status: 'Deployed',
+        updatedAt: admin.firestore.FieldValue.serverTimestamp()
+      }, { merge: true });
+
+      deployed.push(page.title);
+
+      await lockRef.update({ expiresAt: new Date(Date.now() + 2 * 60 * 1000) });
 
     } catch (error: any) {
-      console.error(`Failed to deploy page or lock held: ${error.message}`);
+      console.error(`Failed to deploy page: ${error.message}`);
     }
   }
   return { success: true, deployed: deployed.length, titles: deployed };
@@ -308,44 +382,72 @@ export const deployAssignments = onCall({ secrets: [canvasApiToken] }, async (re
 
   const results = [];
   for (const assign of assignments) {
-    // Lock per assignment to prevent duplicates
-    const lockKey = generateHash(`assign_${assign.courseId}_${assign.title}`);
+    if (!assign.id || !assign.courseId) continue;
+
+    const lockKey = generateHash(`deploy_assign_${assign.id}`);
     const lockRef = db.collection('locks').doc(lockKey);
 
     try {
       await db.runTransaction(async (transaction) => {
         const snap = await transaction.get(lockRef);
-        if (snap.exists()) {
-          const data = snap.data()!;
-          if (data.expiresAt.toDate() > new Date()) {
-            throw new Error(`Lock held for assignment ${assign.title}`);
-          }
+        if (snap.exists() && snap.data()!.expiresAt.toDate() > new Date()) {
+          throw new Error(`Lock active for assignment ${assign.title}`);
         }
-        transaction.set(lockRef, {
-          type: 'assignment',
-          expiresAt: admin.firestore.FieldValue.serverTimestamp()
-        });
+        transaction.set(lockRef, { expiresAt: admin.firestore.FieldValue.serverTimestamp() });
       });
 
-      const res = await canvasRequest(`courses/${assign.courseId}/assignments`, 'POST', {
-        assignment: { 
-          name: assign.title, 
-          points_possible: assign.points, 
-          published: false,
-          description: assign.description || ""
-        }
-      }, token);
+      const assignRef = db.collection('assignments').doc(assign.id);
+      const assignSnap = await assignRef.get();
+      const existingData = assignSnap.exists() ? assignSnap.data() : null;
+
+      const contentToHash = JSON.stringify({ 
+        title: assign.title, 
+        description: assign.description, 
+        points: assign.points 
+      });
+      const currentHash = generateHash(contentToHash);
+      let canvasId = assign.canvasId || existingData?.canvasId;
+
+      if (canvasId && existingData?.contentHash === currentHash) {
+        console.log(`[ASSIGN SKIP] Unchanged: ${assign.title}`);
+        results.push(canvasId);
+        continue;
+      }
+
+      let res;
+      if (canvasId) {
+        console.log(`[ASSIGN UPDATE] Updating ${assign.title} (Canvas ID: ${canvasId})`);
+        res = await canvasRequest(`courses/${assign.courseId}/assignments/${canvasId}`, 'PUT', {
+          assignment: { 
+            name: assign.title, 
+            points_possible: assign.points, 
+            description: assign.description || ""
+          }
+        }, token);
+      } else {
+        console.log(`[ASSIGN CREATE] Creating ${assign.title}`);
+        res = await canvasRequest(`courses/${assign.courseId}/assignments`, 'POST', {
+          assignment: { 
+            name: assign.title, 
+            points_possible: assign.points, 
+            published: false,
+            description: assign.description || ""
+          }
+        }, token);
+        canvasId = res.id.toString();
+      }
       
-      await db.collection('assignments').doc(assign.id).update({
+      await assignRef.update({
         status: 'Deployed', 
-        canvasId: res.id.toString(),
+        canvasId,
+        contentHash: currentHash,
         updatedAt: admin.firestore.FieldValue.serverTimestamp()
       });
 
-      await lockRef.update({ expiresAt: new Date(Date.now() + 5 * 60 * 1000) });
-      results.push(res.id);
+      await lockRef.update({ expiresAt: new Date(Date.now() + 2 * 60 * 1000) });
+      results.push(canvasId);
     } catch (error: any) {
-      console.error(`Assignment deploy skip: ${error.message}`);
+      console.error(`Assignment deploy fail: ${error.message}`);
     }
   }
   return { success: true, count: results.length };
@@ -361,34 +463,60 @@ export const deployAnnouncements = onCall({ secrets: [canvasApiToken] }, async (
   }
 
   for (const ann of announcements) {
+    if (!ann.id || !ann.courseId) continue;
+
     // Lock per announcement
-    const lockKey = generateHash(`ann_${ann.courseId}_${ann.title}`);
+    const lockKey = generateHash(`deploy_ann_${ann.id}`);
     const lockRef = db.collection('locks').doc(lockKey);
 
     try {
       await db.runTransaction(async (transaction) => {
         const snap = await transaction.get(lockRef);
         if (snap.exists() && snap.data()!.expiresAt.toDate() > new Date()) {
-          throw new Error("Lock held");
+          throw new Error("Lock active");
         }
         transaction.set(lockRef, { expiresAt: admin.firestore.FieldValue.serverTimestamp() });
       });
 
-      await canvasRequest(`courses/${ann.courseId}/discussion_topics`, 'POST', {
-        title: ann.title, 
-        message: ann.content, 
-        is_announcement: true, 
-        published: true
-      }, token);
+      const annRef = db.collection('announcements').doc(ann.id);
+      const annSnap = await annRef.get();
+      const existingData = annSnap.exists() ? annSnap.data() : null;
+
+      const currentHash = generateHash(ann.content + ann.title);
+      let canvasId = ann.canvasId || existingData?.canvasId;
+
+      if (canvasId && existingData?.contentHash === currentHash) {
+        console.log(`[ANN SKIP] Unchanged: ${ann.title}`);
+        continue;
+      }
+
+      if (canvasId) {
+        console.log(`[ANN UPDATE] Updating ${ann.title} (Canvas ID: ${canvasId})`);
+        await canvasRequest(`courses/${ann.courseId}/discussion_topics/${canvasId}`, 'PUT', {
+          title: ann.title, 
+          message: ann.content
+        }, token);
+      } else {
+        console.log(`[ANN CREATE] Posting ${ann.title}`);
+        const res = await canvasRequest(`courses/${ann.courseId}/discussion_topics`, 'POST', {
+          title: ann.title, 
+          message: ann.content, 
+          is_announcement: true, 
+          published: true
+        }, token);
+        canvasId = res.id.toString();
+      }
       
-      await db.collection('announcements').doc(ann.id).update({ 
+      await annRef.update({ 
         status: 'Posted',
+        canvasId,
+        contentHash: currentHash,
         updatedAt: admin.firestore.FieldValue.serverTimestamp()
       });
 
-      await lockRef.update({ expiresAt: new Date(Date.now() + 5 * 60 * 1000) });
+      await lockRef.update({ expiresAt: new Date(Date.now() + 2 * 60 * 1000) });
     } catch (error: any) {
-      console.error(`Announcement deploy skip: ${error.message}`);
+      console.error(`Announcement deploy fail: ${error.message}`);
     }
   }
   return { success: true };
@@ -400,7 +528,13 @@ export const generateAIResponse = onCall(async (request: CallableRequest<any>) =
   if (!prompt) throw new HttpsError("invalid-argument", "Prompt is required.");
 
   const model = genAI.getGenerativeModel({ model: "gemini-3-flash-preview" });
-  const result = await model.generateContent(prompt);
+  let result;
+  try {
+    result = await model.generateContent(prompt);
+  } catch (err) {
+    console.error("AI FAILURE", err);
+    throw new Error("Generation failed");
+  }
   return { result: result.response.text() };
 });
 
@@ -554,7 +688,13 @@ export const morningDigest = onSchedule("0 5 * * 1-5", async (event) => {
     `;
 
     const model = genAI.getGenerativeModel({ model: "gemini-3-flash-preview" });
-    const result = await model.generateContent(aiPrompt);
+    let result;
+    try {
+      result = await model.generateContent(aiPrompt);
+    } catch (err) {
+      console.error("AI FAILURE", err);
+      throw new Error("Generation failed");
+    }
     const brief = result.response.text();
 
     // 3. Send via Resend
@@ -742,7 +882,13 @@ export const classifyCanvasFiles = neverCrash(async (request: CallableRequest<an
     `;
 
     const model = genAI.getGenerativeModel({ model: "gemini-3-flash-preview" });
-    const result = await model.generateContent(prompt);
+    let result;
+    try {
+      result = await model.generateContent(prompt);
+    } catch (err) {
+      console.error("AI FAILURE", err);
+      throw new Error("Generation failed");
+    }
     const text = result.response.text();
     
     // Clean and Parse JSON

@@ -74,7 +74,7 @@ export const SyllabusMapper: React.FC<{ weekId?: string }> = () => {
 
         const rawContent = await fetchGoogleSheetData(store.pacingGuideUrl);
         
-        const data = await pacingImportService.parse(rawContent, store.geminiApiKey);
+        const data = pacingImportService.parse(rawContent);
         setPreviewData(data);
         toast.success("Successfully synced from Google Sheet!");
     } catch (err: any) {
@@ -96,7 +96,8 @@ export const SyllabusMapper: React.FC<{ weekId?: string }> = () => {
         const audits: { type: 'math' | 'reading' | 'ela', errors: string[] }[] = [];
 
         // Math Audit
-        const mathLesson = week.mathLesson ?? '';
+        const firstDay = week.days[0] || {};
+        const mathLesson = firstDay.mathLesson ?? '';
         const mathTestNumRaw = typeof mathLesson === 'string' 
           ? mathLesson.toLowerCase().match(/test\s*(\d+)/)?.[1] 
           : null;
@@ -136,7 +137,7 @@ export const SyllabusMapper: React.FC<{ weekId?: string }> = () => {
         throw new Error("Missing Gemini API Key. Please visit the Settings page.");
       }
 
-      const data = await pacingImportService.parse(rawText, store.geminiApiKey);
+      const data = pacingImportService.parse(rawText);
       setPreviewData(data);
     } catch (err: any) {
       setError(err.message || "Failed to parse curriculum.");
@@ -293,20 +294,21 @@ export const SyllabusMapper: React.FC<{ weekId?: string }> = () => {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {previewData?.map((row, i) => {
-                    const hasAuditError = auditResults?.some(a => a?.week === row?.weekNumber);
-                    return (
-                      <TableRow 
-                        key={i} 
-                        className={`hover:bg-zinc-50 dark:hover:bg-zinc-900/50 transition-colors ${hasAuditError ? 'bg-red-50/50 dark:bg-red-900/10' : ''}`}
-                      >
-                        <TableCell className="font-bold">W{row?.weekNumber}</TableCell>
-                        <TableCell className="text-sm">{row?.mathLesson}</TableCell>
-                        <TableCell className="text-sm">Reading W{row?.readingWeek}</TableCell>
-                        <TableCell className="text-sm italic text-zinc-600 dark:text-zinc-400">{row?.elaChapter}</TableCell>
-                      </TableRow>
-                    );
-                  })}
+                      {previewData?.map((row, i) => {
+                        const hasAuditError = auditResults?.some(a => a?.week === row?.weekNumber);
+                        const firstDay = row.days[0] || {} as any;
+                        return (
+                          <TableRow 
+                            key={i} 
+                            className={`hover:bg-zinc-50 dark:hover:bg-zinc-900/50 transition-colors ${hasAuditError ? 'bg-red-50/50 dark:bg-red-900/10' : ''}`}
+                          >
+                            <TableCell className="font-bold">W{row?.weekNumber}</TableCell>
+                            <TableCell className="text-sm">{firstDay.mathLesson}</TableCell>
+                            <TableCell className="text-sm">Reading {firstDay.readingWeek}</TableCell>
+                            <TableCell className="text-sm italic text-zinc-600 dark:text-zinc-400">{firstDay.elaChapter}</TableCell>
+                          </TableRow>
+                        );
+                      })}
                 </TableBody>
               </Table>
             </div>

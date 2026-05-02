@@ -25,9 +25,9 @@ export const plannerAIService = {
    * STAGE 1: PARSE (Delegated to Backend)
    * Triggers a Cloud Function to handle the heavy AI extraction.
    */
-  async startParseTask(rawText: string, existingState?: any, historicalContext?: any): Promise<string> {
+  async startParseTask(rawText: string, existingState?: any, historicalContext?: any, targetDays?: string[]): Promise<string> {
     const startAiPlanGeneration = httpsCallable(functions, 'startAiPlanGeneration');
-    const response = await startAiPlanGeneration({ rawText, existingState, historicalContext });
+    const response = await startAiPlanGeneration({ rawText, existingState, historicalContext, targetDays });
     const data = response.data as { jobId: string };
     return data.jobId;
   },

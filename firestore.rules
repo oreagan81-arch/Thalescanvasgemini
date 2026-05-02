@@ -52,10 +52,14 @@ service cloud.firestore {
       allow read, write: if isSignedIn();
     }
 
-    // --- /ai_generation_cache ---
+    // --- /ai_generation_cache, /generatedAgendas ---
     match /ai_generation_cache/{hash} {
       allow read: if isSignedIn();
       allow create: if isSignedIn() && isValidId(hash);
+    }
+    match /generatedAgendas/{hash} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn(); // Backend handles this mostly, but allow for completeness if needed
     }
 
     // --- /jobs ---

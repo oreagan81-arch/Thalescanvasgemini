@@ -54,9 +54,8 @@ export const curriculumExtractionService = {
       1. Extract every week mentioned.
       2. Identify subjects, topics, and specific assignments/tests.
       3. Friday Agenda Rule: Omit 'In Class' instructional sections for Fridays; focus exclusively on assessments.
-      4. Reading Checkout Rule: For Reading assignments, include the Fluency Goal: '100 words per minute (WPM) with 2 or fewer errors.'
-      5. Thales Standard: Strip vendor names from titles (e.g., 'Saxon Math 4' -> 'Math').
-      6. Return ONLY a valid JSON array matching the required schema.
+      4. Thales Standard: Strip vendor names from titles (e.g., 'Saxon Math 4' -> 'Math').
+      5. Return ONLY a valid JSON array matching the required schema.
       
       Do not include conversational text or markdown blocks. Return raw JSON.
     `;

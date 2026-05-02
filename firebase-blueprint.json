@@ -69,11 +69,16 @@
       "description": "Parent-facing announcement text",
       "type": "object",
       "properties": {
+        "id": { "type": "string" },
+        "courseId": { "type": "number" },
         "weekId": { "type": "string" },
+        "title": { "type": "string" },
         "content": { "type": "string" },
         "status": { "type": "string", "enum": ["Draft", "Posted"] },
-        "createdAt": { "type": "number" },
-        "updatedAt": { "type": "number" }
+        "canvasId": { "type": "string" },
+        "contentHash": { "type": "string" },
+        "createdAt": { "type": "object" },
+        "updatedAt": { "type": "object" }
       },
       "required": ["weekId", "content", "status"]
     },
@@ -108,11 +113,15 @@
       "description": "Staged HTML content for Canvas",
       "type": "object",
       "properties": {
+        "id": { "type": "string" },
+        "courseId": { "type": "number" },
         "weekId": { "type": "string" },
+        "title": { "type": "string" },
         "htmlContent": { "type": "string" },
         "status": { "type": "string", "enum": ["Draft", "Deployed"] },
-        "canvasPageId": { "type": "string" },
-        "updatedAt": { "type": "string", "format": "date-time" }
+        "canvasId": { "type": "string" },
+        "contentHash": { "type": "string" },
+        "updatedAt": { "type": "object" }
       },
       "required": ["weekId", "htmlContent", "status"]
     },
@@ -121,19 +130,24 @@
       "description": "Canvas LMS assignments",
       "type": "object",
       "properties": {
+        "id": { "type": "string" },
         "userId": { "type": "string" },
         "weekId": { "type": "string" },
         "rowId": { "type": "string" },
         "subject": { "type": "string" },
         "title": { "type": "string" },
+        "description": { "type": "string" },
+        "points": { "type": "number" },
         "courseId": { "type": "number" },
         "type": { "type": "string", "enum": ["Assignment", "Quiz", "Discussion"] },
         "dueDate": { "type": "object" },
         "status": { "type": "string", "enum": ["Pending", "Drafted", "Deployed"] },
         "canvasId": { "type": "string" },
+        "contentHash": { "type": "string" },
         "isGraded": { "type": "boolean" },
         "confidence": { "type": "number" },
         "createdAt": { "type": "object" },
+        "updatedAt": { "type": "object" },
         "testNumber": { "type": "number" },
         "powerUp": { "type": "string" },
         "factSkill": { "type": "string" },
@@ -153,9 +167,19 @@
       },
       "required": ["hash", "payload", "createdAt"]
     },
+    "GeneratedAgenda": {
+      "title": "Generated Agenda Cache",
+      "description": "Cached output of AI-enriched plans for deterministic reuse",
+      "type": "object",
+      "properties": {
+        "output": { "type": "object" },
+        "createdAt": { "type": "object" }
+      },
+      "required": ["output"]
+    },
     "Job": {
       "title": "Background Job",
-      "description": "Tracks status of server-side operations",
+      "description": "Tracks status and intermediate states of server-side operations",
       "type": "object",
       "properties": {
         "id": { "type": "string" },
@@ -163,8 +187,34 @@
         "type": { "type": "string", "enum": ["AI_PLAN", "CANVAS_DEPLOY", "NEWSLETTER_GEN"] },
         "status": { "type": "string", "enum": ["pending", "processing", "completed", "failed"] },
         "progress": { "type": "number" },
+        "step": { "type": "string" },
+        "payload": { "type": "object", "description": "The input data for the job" },
+        "promptVersion": { "type": "string" },
+        "intermediateState": {
+          "type": "object",
+          "properties": {
+            "curriculum": { "type": "object" },
+            "structuralPlan": { "type": "object" },
+            "enrichedPlan": { "type": "object" }
+          }
+        },
         "result": { "type": "object" },
         "error": { "type": "string" },
+        "metadata": { "type": "object" },
+        "attempts": { "type": "number" },
+        "maxAttempts": { "type": "number" },
+        "logs": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "step": { "type": "string" },
+              "input": { "type": "object" },
+              "output": { "type": "object" },
+              "time": { "type": "number" }
+            }
+          }
+        },
         "createdAt": { "type": "object" },
         "updatedAt": { "type": "object" }
       },
@@ -194,6 +244,7 @@
     "assignments": { "schema": "Assignment", "description": "LMS assignment registry." },
     "ai_generation_cache": { "schema": "AICache", "description": "Global cache for AI responses." },
     "jobs": { "schema": "Job", "description": "Background task registry." },
+    "generatedAgendas": { "schema": "GeneratedAgenda", "description": "Cache for AI-enriched academic plans." },
     "locks": { "schema": "Lock", "description": "Resource mutual exclusion locks." },
     "artifacts/{appId}/users/{userId}/planner_rows": { "schema": "PlannerRow", "description": "Artifact-scoped user planner rows." },
     "artifacts/{appId}/users/{userId}/announcements": { "schema": "Announcement", "description": "Artifact-scoped user announcements." },

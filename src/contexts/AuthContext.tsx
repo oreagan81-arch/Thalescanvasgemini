@@ -50,7 +50,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   return (
     <AuthContext.Provider value={{ user, loading, signIn, logOut, isAllowedUser }}>
-      {!loading && children}
+      {loading ? (
+        <div className="min-h-screen bg-[#0a0a0c] flex items-center justify-center">
+          <div className="flex flex-col items-center gap-4">
+            <div className="h-10 w-10 border-2 border-amber-500/20 border-t-amber-500 rounded-full animate-spin"></div>
+            <p className="text-slate-500 font-mono text-[10px] uppercase tracking-widest">Verifying Identity...</p>
+          </div>
+        </div>
+      ) : (
+        children
+      )}
     </AuthContext.Provider>
   );
 };
