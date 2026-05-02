@@ -72,6 +72,22 @@ export const plannerService = {
     });
   },
 
+  getWeekRows: async (userId: string, weekId: string) => {
+    try {
+      const q = query(
+        collection(db, COLLECTION_NAME),
+        where('userId', '==', userId),
+        where('weekId', '==', weekId),
+        limit(100)
+      );
+      const snap = await getDocs(q);
+      return snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as PlannerRow));
+    } catch (error) {
+      handleFirestoreError(error, OperationType.LIST, COLLECTION_NAME);
+      return [];
+    }
+  },
+
   addRow: async (row: Omit<PlannerRow, 'id' | 'userId'>) => {
     const userId = auth.currentUser?.uid;
     if (!userId) throw new Error("Authentication required");

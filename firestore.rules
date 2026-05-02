@@ -52,6 +52,23 @@ service cloud.firestore {
       allow read, write: if isSignedIn();
     }
 
+    // --- /ai_generation_cache ---
+    match /ai_generation_cache/{hash} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn() && isValidId(hash);
+    }
+
+    // --- /jobs ---
+    match /jobs/{jobId} {
+      allow read: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow write: if false; // Only manageable via Cloud Functions (Admin SDK)
+    }
+
+    // --- /locks ---
+    match /locks/{lockId} {
+      allow read, write: if false; // Internal locks managed by Admin SDK
+    }
+
     // General fallback for other collections
     match /{collection}/{docId} {
       allow read: if isSignedIn();

@@ -13,6 +13,7 @@ import {
 } from 'firebase/firestore';
 import { db, auth } from '../lib/firebase';
 import { handleFirestoreError, OperationType } from '../lib/firestoreErrorHandler';
+import { SPELLING_TEST_MAP } from '../lib/thales/mappings';
 
 export interface Announcement {
   id?: string;
@@ -26,6 +27,12 @@ export interface Announcement {
 }
 
 const COLLECTION_NAME = 'announcements';
+
+export function getSpellingFocusWords(testNumber: number): string[] {
+  const entry = SPELLING_TEST_MAP[testNumber];
+  if (!entry) return [];
+  return entry.words.slice(20, 25); // Words 21-25
+}
 
 export const announcementService = {
   subscribeByWeek: (userId: string, weekId: string, callback: (announcements: Announcement[]) => void) => {
@@ -78,35 +85,51 @@ export const announcementService = {
 
   upsert: async (weekId: string, content: string, subject?: string) => {
     const userId = auth.currentUser?.uid;
-    if (!userId) throw new Error("Authentication required");
+    if (!userId) throw new Error("User not authenticated.");
+    
+    let finalContent = content;
+
+    // Inject Spelling Focus Words
+    if (subject?.toLowerCase().includes('spelling')) {
+      // Q4_W3 -> Week 33 absolute example logic
+      const qNum = parseInt(weekId.split('_')[0].replace('Q', ''));
+      const wNum = parseInt(weekId.split('_')[1].replace('W', ''));
+      const absWeek = ((qNum - 1) * 9) + wNum; // Simplified instructional week mapping
+      
+      const focusWords = getSpellingFocusWords(absWeek);
+      if (focusWords.length > 0 && !finalContent.includes(focusWords[0])) {
+        finalContent += '\n\n📝 This week\'s 5 focus spelling words: ' + focusWords.join(', ');
+      }
+    }
 
     try {
       const q = query(
         collection(db, COLLECTION_NAME), 
         where('weekId', '==', weekId),
-        where('userId', '==', userId)
+        where('userId', '==', userId),
+        limit(1)
       );
       const snapshot = await getDocs(q);
       
-      const updateData: any = {
-        content,
-        updatedAt: serverTimestamp()
-      };
-      if (subject) updateData.subject = subject;
-
       if (!snapshot.empty) {
-        const existingDoc = snapshot.docs[0];
-        return await updateDoc(doc(db, COLLECTION_NAME, existingDoc.id), updateData);
+        const docRef = doc(db, COLLECTION_NAME, snapshot.docs[0].id);
+        await updateDoc(docRef, { 
+          content: finalContent, 
+          subject: subject || '',
+          updatedAt: serverTimestamp() 
+        });
+        return snapshot.docs[0].id;
       } else {
-        return await addDoc(collection(db, COLLECTION_NAME), {
+        const docRef = await addDoc(collection(db, COLLECTION_NAME), {
           userId,
           weekId,
+          content: finalContent,
           subject: subject || '',
-          content,
           status: 'Draft',
           createdAt: serverTimestamp(),
           updatedAt: serverTimestamp()
         });
+        return docRef.id;
       }
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, COLLECTION_NAME);

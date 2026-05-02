@@ -160,6 +160,11 @@ async function startServer() {
     }
   }
 
+  // Canvas Health Check: Verify if token is configured
+  app.get("/api/canvas-status", (req, res) => {
+    res.json({ configured: !!process.env.CANVAS_API_TOKEN });
+  });
+
   // Canvas API Proxy (Avoids CORS issues and secures token)
   app.all("/api/canvas/*", async (req, res) => {
     const canvasPath = req.params[0];

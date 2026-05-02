@@ -1,4 +1,4 @@
-import { GoogleGenerativeAI } from "@google/generative-ai";
+import { GoogleGenAI } from "@google/genai";
 
 /**
  * System Instructions for Announcement Generation
@@ -33,21 +33,18 @@ export async function generateCanvasAnnouncement(lesson: LessonPlan): Promise<st
     throw new Error("GEMINI_API_KEY is not configured.");
   }
 
-  const genAI = new GoogleGenerativeAI(apiKey);
-  const model = genAI.getGenerativeModel({ 
-    model: "gemini-2.0-flash",
-    systemInstruction: ANNOUNCEMENT_SYSTEM_PROMPT
-  });
-
-  const prompt = `
-    Please generate a Canvas Announcement for the following lesson plan:
-    ${JSON.stringify(lesson, null, 2)}
-  `;
+  const ai = new GoogleGenAI({ apiKey });
 
   try {
-    const result = await model.generateContent(prompt);
-    const response = await result.response;
-    return response.text();
+    const response = await ai.models.generateContent({
+      model: "gemini-2.0-flash",
+      contents: `Please generate a Canvas Announcement for the following lesson plan:\n${JSON.stringify(lesson, null, 2)}`,
+      config: {
+        systemInstruction: ANNOUNCEMENT_SYSTEM_PROMPT
+      }
+    });
+    
+    return response.text || `<h2>${lesson.title}</h2><p>${lesson.description}</p>`;
   } catch (error) {
     console.error("Gemini Announcement Generation Failed:", error);
     return `<h2>${lesson.title}</h2><p>${lesson.description}</p><p>Check Canvas for details.</p>`;

@@ -33,14 +33,14 @@ interface PlannerSyncDiffProps {
 }
 
 export function PlannerSyncDiff({ courseId, courseName }: PlannerSyncDiffProps) {
-  const { plannerData, canvasApiToken } = useStore();
+  const { plannerData, canvasTokenConfigured } = useStore();
   const [isOpen, setIsOpen] = useState(false);
   const [isCalculating, setIsCalculating] = useState(false);
   const [isExecuting, setIsExecuting] = useState(false);
   const [diff, setDiff] = useState<DiffResult | null>(null);
 
   const handleCalculateDiff = async () => {
-    if (!canvasApiToken) {
+    if (!canvasTokenConfigured) {
       toast.error("Canvas Token Missing", {
         description: "Please configure your API token in Settings."
       });

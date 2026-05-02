@@ -37,7 +37,7 @@ import { cn } from '@/lib/utils'
 export function Assignments() {
   const { user } = useAuth();
   const currentContext = calendarService.getAcademicContext();
-  const { selectedWeek: week, setWeek, canvasCourseIds, canvasApiToken } = useStore();
+  const { selectedWeek: week, setWeek, canvasCourseIds, canvasTokenConfigured } = useStore();
   const [assignments, setAssignments] = useState<Assignment[]>([]);
   const [loading, setLoading] = useState(false);
   const [syncing, setSyncing] = useState(true);
@@ -55,7 +55,7 @@ export function Assignments() {
   }, [week, user]);
 
   const handleRunDiff = async () => {
-    if (!canvasApiToken) {
+    if (!canvasTokenConfigured) {
       toast.error("Canvas API Token Missing", {
         description: "Please configure it in Settings first."
       });

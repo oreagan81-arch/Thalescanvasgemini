@@ -9,13 +9,13 @@ import { useThalesStore } from '../../store';
 export function MissingAssetAlarms({ courseId, weekId }: { courseId: string, weekId: string }) {
   const [missingFiles, setMissingFiles] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
-  const canvasApiToken = useThalesStore((state) => state.canvasApiToken);
+  const canvasTokenConfigured = useThalesStore((state) => state.canvasTokenConfigured);
 
   // Simulated logic: find assignments that sound like they need a file
   // and check if a file with that name exists on Canvas
   useEffect(() => {
     const checkAssets = async () => {
-      if (!courseId || !canvasApiToken) return;
+      if (!courseId || !canvasTokenConfigured) return;
       setLoading(true);
       try {
         const files = await canvasApiService.getCourseFiles(courseId);
@@ -34,7 +34,7 @@ export function MissingAssetAlarms({ courseId, weekId }: { courseId: string, wee
     };
 
     checkAssets();
-  }, [courseId, weekId, canvasApiToken]);
+  }, [courseId, weekId, canvasTokenConfigured]);
 
   if (missingFiles.length === 0) return null;
 

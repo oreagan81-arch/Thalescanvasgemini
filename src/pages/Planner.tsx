@@ -4,9 +4,12 @@ import { toast } from 'sonner';
 
 import { useStore } from '../store';
 import { plannerService, PlannerRow } from '../services/service.planner';
-import { processPacingGuide } from '../services/service.plannerAI'; 
+import { plannerAIService, AIPlannerResult } from '../services/plannerAIService'; 
 import { calendarService } from '../services/service.calendar';
 import { useAuth } from '../contexts/AuthContext';
+import { auth } from '../lib/firebase';
+import { useJob } from '../hooks/useJob';
+import { CommandReviewModal } from '../components/planner/CommandReviewModal';
 
 import { ScrollArea, ScrollBar } from '../../components/ui/scroll-area';
 
@@ -21,7 +24,8 @@ export default function Planner() {
   const { 
     selectedWeek: week, 
     setWeek,
-    plannerData
+    activeJobId,
+    setActiveJob
   } = useStore();
   
   const [rows, setRows] = useState<PlannerRow[]>([]);
@@ -29,6 +33,76 @@ export default function Planner() {
   const [syncing, setSyncing] = useState(false);
   const rowsRef = useRef<PlannerRow[]>([]);
   const autoFillTriggeredRef = useRef<Record<string, boolean>>({});
+
+  // Review Layer State
+  const [pendingPlan, setPendingPlan] = useState<AIPlannerResult | null>(null);
+
+  // Monitor Job Progress
+  const { job } = useJob(activeJobId);
+
+  useEffect(() => {
+    if (job?.status === 'completed' && job.result) {
+      setPendingPlan(job.result as AIPlannerResult);
+    }
+  }, [job?.status]);
+
+  const handleCommitPlan = async () => {
+    if (!pendingPlan) return;
+    try {
+      toast.info("Finalizing Neural Synthesis...");
+      
+      const existingRows = rowsRef.current;
+      const newPlanDays = pendingPlan.days;
+
+      // 1. Determine deletions
+      const preservedIds = new Set(newPlanDays.map(d => d.id).filter(id => id));
+      const toDelete = existingRows.filter(r => !preservedIds.has(r.id));
+
+      for (const row of toDelete) {
+        await plannerService.deleteRow(row.id!);
+      }
+
+      // 2. Apply Updates and Additions
+      const DAY_MAP: Record<string, string> = { 
+        Monday: 'Monday', Tuesday: 'Tuesday', Wednesday: 'Wednesday', Thursday: 'Thursday', Friday: 'Friday' 
+      };
+      
+      for (const dayPlan of newPlanDays) {
+        const day = DAY_MAP[dayPlan.day] || dayPlan.day;
+        
+        const rowData = {
+          weekId: week,
+          day,
+          subject: pendingPlan.course || 'Curriculum',
+          lessonNum: '',
+          lessonTitle: dayPlan.lesson,
+          type: 'Lesson' as const,
+          resources: dayPlan.resources || [],
+          homework: dayPlan.homework || '',
+          reminder: '',
+          notes: (dayPlan.objectives || []).join('\n'),
+          deployStatus: 'Draft' as const,
+          updatedAt: Date.now()
+        };
+
+        if (dayPlan.id) {
+          await plannerService.updateRow(dayPlan.id, rowData);
+        } else {
+          await plannerService.addRow({
+            ...rowData,
+            order: Date.now()
+          });
+        }
+      }
+      
+      toast.success("Command Output Mapped! Preserved your manual changes.");
+      setActiveJob(null);
+      setPendingPlan(null);
+    } catch (err) {
+      console.error(err);
+      toast.error("Mapping Failed: Brain integrity lost.");
+    }
+  };
 
   useEffect(() => {
     rowsRef.current = rows;
@@ -142,9 +216,8 @@ export default function Planner() {
   const handleAiAutofill = useCallback(async () => {
     try {
       setSyncing(true);
-      toast.info("AI preparing your weekly plan...");
+      toast.info("Dispatching Command to Brain Queue...");
 
-      const { useStore } = await import('../store');
       const store = useStore.getState();
       const url = store.pacingGuideUrl;
       const proxyUrl = `/api/proxy/google-sheets?url=${encodeURIComponent(url)}`;
@@ -152,127 +225,129 @@ export default function Planner() {
       if (!response.ok) throw new Error("Failed to fetch Google Sheet");
       const rawText = await response.text();
 
-      const plan = await processPacingGuide(rawText);
-      
-      if (!plan || !plan.weekDays) {
-         toast.error("Failed to generate plan structure");
-         return;
-      }
-      
-      // Cleanup existing rows using current rows ref
-      for (const row of rowsRef.current) {
-        await plannerService.deleteRow(row.id!);
-      }
+      // Collect existing state for diffing
+      const existingState = rowsRef.current.map(r => ({
+        id: r.id,
+        day: r.day,
+        lesson: r.lessonTitle,
+        homework: r.homework,
+        notes: r.notes
+      }));
 
-      // Populate new rows
-      const DAY_MAP = { monday: 'Monday', tuesday: 'Tuesday', wednesday: 'Wednesday', thursday: 'Thursday', friday: 'Friday' };
-      
-      for (const [dayKey, dayPlan] of Object.entries(plan.weekDays)) {
-        const day = DAY_MAP[dayKey as keyof typeof DAY_MAP];
-        
-        if (dayPlan.lessons.length === 0) {
-            // Create at least one empty row per day if no lessons
-            await plannerService.addRow({
-                weekId: week, day, subject: '', lessonNum: '', lessonTitle: '', type: 'Lesson', resources: [], homework: '', reminder: '', notes: '', deployStatus: 'Draft', order: Date.now()
-            });
-            continue;
+      // Collect historical context (previous week)
+      let historicalContext: any = null;
+      try {
+        const userId = auth.currentUser?.uid;
+        if (userId && week) {
+          // week format is Qx_Wx
+          const parts = week.split('_');
+          const q = parseInt(parts[0].substring(1));
+          const w = parseInt(parts[1].substring(1));
+          
+          let prevQ = q;
+          let prevW = w - 1;
+          
+          if (prevW === 0) {
+            prevQ = q - 1;
+            prevW = prevQ === 3 ? 10 : 9; // Q4 has 10 weeks
+          }
+
+          if (prevQ > 0) {
+            const prevWeekId = `Q${prevQ}_W${prevW}`;
+            const prevRows = await plannerService.getWeekRows(userId, prevWeekId);
+            historicalContext = prevRows.map(r => ({
+              day: r.day,
+              subject: r.subject,
+              lesson: r.lessonTitle,
+              homework: r.homework,
+              notes: r.notes
+            }));
+          }
         }
-
-        for (const lesson of dayPlan.lessons) {
-             const parts = lesson.split(' ');
-             const subject = parts.length > 1 ? parts[0] : 'Lesson';
-             const title = parts.length > 1 ? parts.slice(1).join(' ') : lesson;
-
-             await plannerService.addRow({
-                weekId: week,
-                day,
-                subject,
-                lessonNum: '',
-                lessonTitle: title,
-                type: 'Lesson',
-                resources: dayPlan.resources,
-                homework: getHomework(subject, title, dayPlan.assignments),
-                reminder: '',
-                notes: '',
-                deployStatus: 'Draft',
-                order: Date.now()
-             });
-        }
+      } catch (err) {
+        console.warn("Failed to fetch historical context, proceeding without memory.");
       }
-      
-      toast.success("AI Plan Generated! You can now make changes.");
+
+      const jobId = await plannerAIService.startParseTask(rawText, existingState, historicalContext);
+      setActiveJob(jobId);
     } catch (err) {
       console.error(err);
-      toast.error("AI Autofill Failed");
+      toast.error("Command Dispatch Failed");
     } finally {
       setSyncing(false);
     }
-  }, [week]);
+  }, [week, setActiveJob]);
 
   const handlePastePlan = useCallback(async (text: string) => {
     try {
       setSyncing(true);
-      toast.info("Processing pasted plan...");
+      toast.info("Dispatching Command to Brain Queue...");
 
-      const plan = await processPacingGuide(text); 
-      
-      if (!plan || !plan.weekDays) {
-         toast.error("Failed to generate plan structure");
-         return;
-      }
-      
-      // Cleanup existing rows using current rows ref
-      for (const row of rowsRef.current) {
-        await plannerService.deleteRow(row.id!);
-      }
+      // Collect existing state for diffing
+      const existingState = rowsRef.current.map(r => ({
+        id: r.id,
+        day: r.day,
+        lesson: r.lessonTitle,
+        homework: r.homework,
+        notes: r.notes
+      }));
 
-      // Populate new rows
-      const DAY_MAP = { monday: 'Monday', tuesday: 'Tuesday', wednesday: 'Wednesday', thursday: 'Thursday', friday: 'Friday' };
-      
-      for (const [dayKey, dayPlan] of Object.entries(plan.weekDays)) {
-        const day = DAY_MAP[dayKey as keyof typeof DAY_MAP];
-        
-        if (dayPlan.lessons.length === 0) {
-            // Create at least one empty row per day if no lessons
-            await plannerService.addRow({
-                weekId: week, day, subject: '', lessonNum: '', lessonTitle: '', type: 'Lesson', resources: [], homework: '', reminder: '', notes: '', deployStatus: 'Draft', order: Date.now()
-            });
-            continue;
+      // Collect historical context (previous week)
+      let historicalContext: any = null;
+      try {
+        const userId = auth.currentUser?.uid;
+        if (userId && week) {
+          const parts = week.split('_');
+          const q = parseInt(parts[0].substring(1));
+          const w = parseInt(parts[1].substring(1));
+          
+          let prevQ = q;
+          let prevW = w - 1;
+          
+          if (prevW === 0) {
+            prevQ = q - 1;
+            prevW = prevQ === 3 ? 10 : 9;
+          }
+
+          if (prevQ > 0) {
+            const prevWeekId = `Q${prevQ}_W${prevW}`;
+            const prevRows = await plannerService.getWeekRows(userId, prevWeekId);
+            historicalContext = prevRows.map(r => ({
+              day: r.day,
+              subject: r.subject,
+              lesson: r.lessonTitle,
+              homework: r.homework,
+              notes: r.notes
+            }));
+          }
         }
-
-        for (const lesson of dayPlan.lessons) {
-             const parts = lesson.split(' ');
-             const subject = parts.length > 1 ? parts[0] : 'Lesson';
-             const title = parts.length > 1 ? parts.slice(1).join(' ') : lesson;
-
-             await plannerService.addRow({
-                weekId: week,
-                day,
-                subject,
-                lessonNum: '',
-                lessonTitle: title,
-                type: 'Lesson',
-                resources: dayPlan.resources,
-                homework: dayPlan.assignments.join(', '),
-                reminder: '',
-                notes: '',
-                deployStatus: 'Draft',
-                order: Date.now()
-             });
-        }
+      } catch (err) {
+        console.warn("Failed to fetch historical context, proceeding without memory.");
       }
-      
-      toast.success("Plan Imported! You can now make changes.");
+
+      const jobId = await plannerAIService.startParseTask(text, existingState, historicalContext); 
+      setActiveJob(jobId);
     } catch (err) {
       console.error(err);
-      toast.error("Paste Plan Failed");
+      toast.error("Command Dispatch Failed");
     } finally {
       setSyncing(false);
     }
-  }, [week]);
+  }, [week, setActiveJob]);
 
   return (
     <div className="flex flex-col h-full space-y-6">
+      {pendingPlan && (
+        <CommandReviewModal 
+          plan={pendingPlan}
+          existingRows={rows}
+          onConfirm={handleCommitPlan}
+          onCancel={() => {
+            setPendingPlan(null);
+            setActiveJob(null);
+          }}
+        />
+      )}
       <PlannerHeader 
         week={week}
         setWeek={setWeek}

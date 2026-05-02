@@ -25,15 +25,17 @@ import { Announcements } from './pages/Announcements';
 import NewsletterBuilder from './pages/NewsletterBuilder';
 import { Resources } from './pages/Resources';
 import { Settings } from './pages/Settings';
+import Diagnostics from './pages/Diagnostics';
 import { Templates } from './pages/Templates';
 import { SyllabusMapper } from './components/planner/SyllabusMapper';
 import AnnouncementCommandCenter from './pages/AnnouncementCommandCenter';
 import { useStore } from './store';
 import React, { Suspense, useEffect } from 'react';
 import { calendarService } from './services/service.calendar';
+import { canvasApiService } from './services/canvasApiService';
 
 const CalendarSynchronizer = () => {
-  const { setWeek, setQuarter } = useStore();
+  const { setWeek, setQuarter, setCanvasTokenConfigured } = useStore();
 
   useEffect(() => {
     // Force sync to current academic context on initial application load
@@ -42,7 +44,12 @@ const CalendarSynchronizer = () => {
     setWeek(weekId);
     setQuarter(context.quarter);
     console.log(`[SYSTEM] Terminal state synchronized to active instructional period: ${weekId}`);
-  }, [setWeek, setQuarter]);
+
+    // Check Canvas connectivity
+    canvasApiService.checkStatus().then(configured => {
+      setCanvasTokenConfigured(configured);
+    });
+  }, [setWeek, setQuarter, setCanvasTokenConfigured]);
 
   return null;
 };
@@ -129,6 +136,7 @@ export default function App() {
                   <Route path="newsletters" element={<NewsletterBuilder />} />
                   <Route path="command-center" element={<AnnouncementCommandCenter />} />
                   <Route path="resources" element={<Resources />} />
+                  <Route path="diagnostics" element={<Diagnostics />} />
                   <Route path="settings" element={<Settings />} />
                   <Route path="templates" element={<Templates />} />
                 </Route>

@@ -28,11 +28,14 @@ import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
 import { useDashboardLogic } from '../hooks/hook.useDashboardLogic';
 import { HelpDialog } from '../components/HelpDialog';
+import { CommandCenterBrain } from '../components/CommandCenterBrain';
 
 export function DashboardLayout() {
   const { logOut } = useAuth();
   const sidebarOpen = useStore((state) => state.sidebarOpen);
   const heartbeatLogs = useStore((state) => state.heartbeatLogs);
+  const activeJobId = useStore((state) => state.activeJobId);
+  const setActiveJob = useStore((state) => state.setActiveJob);
   
   const {
     gitToken,
@@ -56,11 +59,19 @@ export function DashboardLayout() {
     { icon: Sparkles, label: 'AI Command Center', to: '/command-center' },
     { icon: Layout, label: 'Blueprints', to: '/templates' },
     { icon: Layers, label: 'Resource Brain', to: '/resources' },
+    { icon: Activity, label: 'Diagnostics', to: '/diagnostics' },
     { icon: Settings, label: 'Settings', to: '/settings' },
   ];
 
   return (
     <div className="flex h-screen bg-[#0a0a0c] text-slate-100 overflow-hidden font-sans">
+      <CommandCenterBrain 
+        jobId={activeJobId} 
+        onComplete={() => {
+           // We might want to keep it visible for a bit or wait for user to dismiss
+        }}
+        onReset={() => setActiveJob(null)}
+      />
       {/* Sidebar - Linear/Superhuman inspired minimal rail */}
       <nav className="w-16 lg:w-64 flex flex-col border-r border-white/10 bg-[#0d0d10] z-20 transition-all duration-300">
         <div className="h-16 flex items-center justify-center lg:justify-start px-4 lg:px-6 border-b border-white/10 shrink-0">

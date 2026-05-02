@@ -43,11 +43,14 @@ interface DataSlice {
 
 interface SettingsSlice {
   geminiApiKey: string;
-  canvasApiToken: string;
-  canvasCourseIds: Record<string, string>; 
+  canvasTokenConfigured: boolean; // Read-only server status
+  dryRun: boolean;
+  canvasCourseIds: Record<string, string>;
   schoolStartDate: string | null;
-  pacingGuideUrl: string; 
-  setSettings: (settings: Partial<Pick<SettingsSlice, 'geminiApiKey' | 'canvasApiToken' | 'schoolStartDate' | 'pacingGuideUrl' | 'canvasCourseIds'>>) => void;
+  pacingGuideUrl: string;
+  setSettings: (settings: Partial<Pick<SettingsSlice, 'geminiApiKey' | 'schoolStartDate' | 'pacingGuideUrl' | 'canvasCourseIds' | 'dryRun'>>) => void;
+  setCanvasTokenConfigured: (val: boolean) => void;
+  setDryRun: (val: boolean) => void;
   updateCourseId: (subject: string, newId: string) => void;
 }
 
@@ -56,9 +59,19 @@ interface MetaSlice {
   setHasHydrated: (val: boolean) => void;
 }
 
-export type ThalesState = UISlice & AcademicSlice & DataSlice & CommandSlice & SettingsSlice & MetaSlice;
+interface BrainSlice {
+  activeJobId: string | null;
+  setActiveJob: (jobId: string | null) => void;
+}
+
+export type ThalesState = UISlice & AcademicSlice & DataSlice & CommandSlice & SettingsSlice & MetaSlice & BrainSlice;
 
 const initialContext = calendarService.getAcademicContext();
+
+const createBrainSlice: StateCreator<ThalesState, [], [], BrainSlice> = (set) => ({
+  activeJobId: null,
+  setActiveJob: (jobId) => set({ activeJobId: jobId }),
+});
 
 const createUISlice: StateCreator<ThalesState, [], [], UISlice> = (set) => ({
   sidebarOpen: true,
@@ -129,24 +142,24 @@ const createCommandSlice: StateCreator<ThalesState, [], [], CommandSlice> = (set
 
 const createSettingsSlice: StateCreator<ThalesState, [], [], SettingsSlice> = (set) => ({
   geminiApiKey: import.meta.env.VITE_GEMINI_API_KEY || '',
-  canvasApiToken: '',
+  canvasTokenConfigured: false,
+  dryRun: true, // Safe default
   canvasCourseIds: {
-    'Homeroom': '22254', 
-    'Math': '21957', 
-    'Reading': '21919', 
-    'Spelling': '21919', 
-    'ELA': '21944', 
+    'Math': '21957',
+    'Reading': '21919',
     'Language Arts': '21944',
-    'Science': '21970', 
-    'History': '21934'
+    'History': '21934',
+    'Science': '21970',
+    'Homeroom': '22254'
   },
-  schoolStartDate: null,
-  pacingGuideUrl: 'https://docs.google.com/spreadsheets/d/e/2PACX-1vTRf9-kG7C2iO75HNB2y4roFZ55YS3gyMFMijGiJsVW8Qm7njs5rTsir6U8Cvi0pljaJAh17WvbqX7f/pub?output=csv',
+  schoolStartDate: '2025-07-21',
+  pacingGuideUrl: '',
   setSettings: (settings) => set((state) => ({ ...state, ...settings })),
+  setCanvasTokenConfigured: (val) => set({ canvasTokenConfigured: val }),
+  setDryRun: (val) => set({ dryRun: val }),
   updateCourseId: (subject, newId) => set((state) => ({
     canvasCourseIds: { ...state.canvasCourseIds, [subject]: newId }
-  })),
-  // Command to pull secrets from AI Studio environment (handled by server.ts proxy usually)
+  }))
 });
 
 const createMetaSlice: StateCreator<ThalesState, [], [], MetaSlice> = (set) => ({
@@ -163,6 +176,7 @@ export const useStore = create<ThalesState>()(
       ...createCommandSlice(set, get, api),
       ...createSettingsSlice(set, get, api),
       ...createMetaSlice(set, get, api),
+      ...createBrainSlice(set, get, api),
     }),
     {
       name: 'thales-os-storage',
@@ -195,8 +209,9 @@ export const useStore = create<ThalesState>()(
         sidebarOpen: state.sidebarOpen,
         theme: state.theme,
         geminiApiKey: state.geminiApiKey,
-        canvasApiToken: state.canvasApiToken,
-        canvasCourseIds: state.canvasCourseIds, 
+        canvasTokenConfigured: state.canvasTokenConfigured,
+        dryRun: state.dryRun,
+        canvasCourseIds: state.canvasCourseIds,
         schoolStartDate: state.schoolStartDate,
         pacingGuideUrl: state.pacingGuideUrl,
         plannerData: state.plannerData,

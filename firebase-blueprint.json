@@ -141,6 +141,45 @@
         "hasStudyGuide": { "type": "boolean" }
       },
       "required": ["userId", "weekId", "rowId", "subject", "title", "courseId", "type", "status"]
+    },
+    "AICache": {
+      "title": "AI Generation Cache",
+      "description": "Cached results of expensive AI operations",
+      "type": "object",
+      "properties": {
+        "hash": { "type": "string" },
+        "payload": { "type": "object" },
+        "createdAt": { "type": "object" }
+      },
+      "required": ["hash", "payload", "createdAt"]
+    },
+    "Job": {
+      "title": "Background Job",
+      "description": "Tracks status of server-side operations",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "type": { "type": "string", "enum": ["AI_PLAN", "CANVAS_DEPLOY", "NEWSLETTER_GEN"] },
+        "status": { "type": "string", "enum": ["pending", "processing", "completed", "failed"] },
+        "progress": { "type": "number" },
+        "result": { "type": "object" },
+        "error": { "type": "string" },
+        "createdAt": { "type": "object" },
+        "updatedAt": { "type": "object" }
+      },
+      "required": ["id", "userId", "type", "status", "createdAt"]
+    },
+    "Lock": {
+      "title": "System Lock",
+      "description": "Prevents concurrent operations on resources",
+      "type": "object",
+      "properties": {
+        "courseId": { "type": "string" },
+        "title": { "type": "string" },
+        "expiresAt": { "type": "object" }
+      },
+      "required": ["expiresAt"]
     }
   },
   "firestore": {
@@ -153,6 +192,9 @@
     "settings": { "schema": "Setting", "description": "User preference profile." },
     "canvas_pages": { "schema": "CanvasPage", "description": "HTML staging area." },
     "assignments": { "schema": "Assignment", "description": "LMS assignment registry." },
+    "ai_generation_cache": { "schema": "AICache", "description": "Global cache for AI responses." },
+    "jobs": { "schema": "Job", "description": "Background task registry." },
+    "locks": { "schema": "Lock", "description": "Resource mutual exclusion locks." },
     "artifacts/{appId}/users/{userId}/planner_rows": { "schema": "PlannerRow", "description": "Artifact-scoped user planner rows." },
     "artifacts/{appId}/users/{userId}/announcements": { "schema": "Announcement", "description": "Artifact-scoped user announcements." },
     "artifacts/{appId}/users/{userId}/settings": { "schema": "Setting", "description": "Artifact-scoped user settings." },

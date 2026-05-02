@@ -61,25 +61,19 @@ export const getBirthdaysForMonth = (date: Date) => {
 
 // Base Cidi Labs Template
 const BASE_TEMPLATE = `
-<div id="kl_wrapper_3" class="kl_circle_left kl_wrapper" style="border-style: none;">
-    <div id="kl_banner" class="">
-        <h1 style="color: #0e68b3; text-align: center;">[HEADER_TITLE]</h1>
-        <h3 style="color: #9e58bd; text-align: center;">[HEADER_DATES]</h3>
-        
-        <h4 style="background: #fbeeb8; padding: 5px;"><span style="background-color: #000000; color: #ffffff;">Important Dates</span></h4>
-        [DATES_LIST]
-        
-        <h4 style="background: #fbeeb8; padding: 5px;"><span style="background-color: #000000; color: #ffffff;">Homeroom News</span></h4>
-        [NEWS_CONTENT]
-        
-        <h4 style="color: #e91e63;">[BIRTHDAY_TITLE]</h4>
-        [BIRTHDAY_CONTENT]
-        
-        <div style="background: #f4f4f4; padding: 10px; margin-top: 20px; font-size: 12px; border-radius: 5px;">
-            <strong>Quick Links:</strong><br />
-            [QUICK_LINKS]
-        </div>
+<div style="background-color: #f4f4f4; padding: 20px; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;">
+  <div style="max-width: 600px; margin: 0 auto; background-color: #ffffff; border-radius: 8px; overflow: hidden; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
+    <div style="background-color: #0065a7; color: #ffffff; padding: 30px; text-align: center;">
+      <h1 style="margin: 0; font-size: 24px;">Thales Academy News</h1>
+      <p style="margin: 5px 0 0; opacity: 0.8;">Grade 4 Weekly Newsletter</p>
     </div>
+    <div style="padding: 25px; color: #333333; line-height: 1.6;">
+      <div style="border-left: 4px solid #c87800; padding-left: 15px; margin-bottom: 25px;">
+        <h2 style="color: #0065a7; margin-top: 0;">Weekly Highlights</h2>
+        {{content}}
+      </div>
+    </div>
+  </div>
 </div>
 `;
 

@@ -21,124 +21,65 @@ export interface GeneratedAssignment {
   isStudyGuide?: boolean;
   gradingType?: 'pass_fail' | 'percent' | 'letter_grade' | 'points';
   omitFromFinalGrade?: boolean;
-  dueDateOffset?: number; // Days to offset from record's date (e.g. -1 for day before)
+  dueDateOffset?: number;
 }
 
 export const rulesEngine = {
-  /**
-   * Rule #1: Assignment Generation Logic.
-   * Deterministically creates required Canvas assignments based on the pacing row.
-   */
   generateAssignments: (row: PlannerRow): GeneratedAssignment[] => {
+    // RULE 0 — FRIDAY: No assignments on Friday.
+    if (row.day === 'Friday') return [];
+
     const assignments: GeneratedAssignment[] = [];
+    const n = parseInt(row.lessonNum);
 
+    // RULE 1 & 2 — MATH
     if (row.subject === 'Math') {
-      // Brevity Mandate: Strip 'Saxon Math'
-      const cleanTitle = row.lessonTitle.replace(/Saxon Math/gi, '').trim();
-
       if (row.type === 'Test') {
-        // Triple Sequence: Written Test (100), Fact Test (100), Study Guide (0, day before)
-        assignments.push({ 
-          title: `Math Written Test ${row.lessonNum}`, 
-          points: 100, 
-          published: false,
-          gradingType: 'percent'
-        });
-        assignments.push({ 
-          title: `Math Fact Test ${row.lessonNum}`, 
-          points: 100, 
-          published: false,
-          gradingType: 'percent'
-        });
-        assignments.push({ 
-          title: `Math Study Guide ${row.lessonNum}`, 
-          points: 0, 
-          published: false, 
-          isStudyGuide: true,
-          gradingType: 'pass_fail',
-          omitFromFinalGrade: true,
-          dueDateOffset: -1 // Scheduled for the day before
-        });
+        assignments.push({ title: `SM5: Math Test ${row.lessonNum}`, points: 100, published: false, gradingType: 'percent' });
+        assignments.push({ title: `SM5: Fact Test ${row.lessonNum}`, points: 100, published: false, gradingType: 'percent' });
+        assignments.push({ title: `SM5: Study Guide ${row.lessonNum}`, points: 0, published: false, isStudyGuide: true, gradingType: 'pass_fail', omitFromFinalGrade: true });
       } else {
-        if (row.day !== 'Friday') {
-          const lessonNum = rulesEngine.safeParseNumber(row.lessonNum);
-          const hwSuffix = lessonNum % 2 === 0 ? "Evens HW" : "Odds HW";
-          
-          assignments.push({ 
-            title: `Math ${row.lessonNum} ${hwSuffix}`, 
-            points: 100, 
-            published: false,
-            gradingType: 'percent'
-          });
-        }
+        // PARITY CHECK: One assignment per day (Evens OR Odds)
+        const suffix = n % 2 === 0 ? 'Evens' : 'Odds';
+        assignments.push({ title: `SM5: Lesson ${row.lessonNum} ${suffix}`, points: 100, published: false, gradingType: 'percent' });
+      }
+    } 
+    // RULE 3, 4, 5 — READING
+    else if (row.subject === 'Reading') {
+      if (row.type === 'Lesson') {
+        assignments.push({ title: `RM4: Reading HW ${row.lessonNum}`, points: 100, published: false, gradingType: 'percent' });
+      } else if (row.type === 'Test') {
+        const normalizedN = n > 14 ? Math.round(n / 10) : n;
+        assignments.push({ title: `RM4: Mastery Test ${normalizedN}`, points: 100, published: false, gradingType: 'percent' });
+      } else if (row.type === 'Review') {
+        assignments.push({ title: `RM4: Reading Checkout ${row.lessonNum}`, points: 100, published: false, gradingType: 'percent' });
       }
     }
+    // RULE 6 — SPELLING
+    else if (row.subject === 'Spelling' && row.type === 'Test') {
+      assignments.push({ title: `RM4: Spelling Test ${row.lessonNum}`, points: 100, published: false, gradingType: 'percent' });
+    }
+    // RULE 7, 8, 9 — ELA
     else if (row.subject === 'Language Arts') {
-      const command = row.lessonNum.toString().includes('.') ? row.lessonNum.toString() : `${row.type}${row.lessonNum}`;
-      const resolved = resolveELAResource(command);
-      
-      if (resolved) {
-        // Expand the lesson title for the agenda
-        row.lessonTitle = resolved.title;
-
-        if (resolved.isAssignment) {
-          assignments.push({ 
-            title: resolved.title, 
-            points: 100, 
-            published: false,
-            gradingType: 'percent'
-          });
-        }
-      } else if (row.type === 'CP' || row.type === 'Test') {
-        assignments.push({ 
-          title: `Grammar ${row.type === 'Test' ? 'Chapter Test' : 'Classroom Practice'} ${row.lessonNum}`, 
-          points: 100, 
-          published: false,
-          gradingType: 'percent'
-        });
+      if (row.type === 'CP') {
+        assignments.push({ title: `ELA4: Classroom Practice ${row.lessonNum}`, points: 100, published: false, gradingType: 'percent' });
+      } else if (row.type === 'Test') {
+        const chapterNum = row.lessonNum.toString().split('.')[0];
+        assignments.push({ title: `ELA4: Shurley Test ${chapterNum}`, points: 100, published: false, gradingType: 'percent' });
       }
+      // Lessons return [] per Rule 9
     }
-    else if (row.subject === 'Science' || row.subject === 'History') {
-      if (['Test', 'Quiz', 'Project'].includes(row.type)) {
-        assignments.push({ 
-          title: `${row.subject} ${row.type} ${row.lessonNum}`, 
-          points: 100, 
-          published: false,
-          gradingType: 'percent'
-        });
-      }
-    }
-    else if (row.subject === 'Reading' || row.subject === 'Spelling') {
-      if (row.type === 'Test') {
-        assignments.push({ 
-          title: `${row.subject} Test ${row.lessonNum}`, 
-          points: 100, 
-          published: false,
-          gradingType: 'percent'
-        });
-      }
-    }
+    // RULE 10 & 11 — HISTORY / SCIENCE (Always empty)
 
     return assignments;
   },
 
-  /**
-   * Rule #2: Friendly URL Slug Generator.
-   * Converts internal IDs and titles into human-readable Canvas paths.
-   */
   generateFriendlySlug: (prefix: string, title: string, id: string): string => {
-    const cleanTitle = title
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, '-')
-      .replace(/(^-|-$)/g, '');
-    
+    const cleanTitle = title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
     const shortId = id.slice(0, 4);
     return `/${prefix}/${cleanTitle}-${shortId}`;
   },
 
-  /**
-   * Fix 5: NaN & Type Guarding
-   */
   safeParseNumber: (value: any, fallback: number = 0): number => {
     if (typeof value === 'number' && !isNaN(value)) return value;
     if (typeof value === 'string') {
@@ -148,33 +89,18 @@ export const rulesEngine = {
     return fallback;
   },
 
-  /**
-   * Upgrade: Regex Clickable Downloads
-   * Detects raw HTTP strings and wraps them in Canvas native preview styling.
-   */
   clickableDownloads: (html: string): string => {
     if (!html) return html;
-    // Regex for URLs not already inside an href or src
     const urlRegex = /(?<!href="|src=")(https?:\/\/[^\s<]+)/gi;
     return html.replace(urlRegex, (url) => {
       return `<a class="instructure_file_link inline_disabled" href="${url}" target="_blank" title="Download Resource">${url}</a>`;
     });
   },
 
-  /**
-   * Fix 5: Brevity Mandate Enforcement (Silent Auditor)
-   */
   silentAuditor: (content: string): string => {
     if (!content) return content;
-    
-    // Improved Regex to handle common misspellings and abbreviations
-    // Saxon: Saxon, Saxton, Saxin, Saksen
-    // Shurley: Shurley, Shirley, Shurly, Shurlee
-    // Story of the World: SOTW, Story of the World
     const forbiddenVendors = /\b(Sa[xk]s?t?o[ni]e?(\s*Math)?|Sh[iu]rl[ey]e?(\s*(English|Grammar))?|Story\s*of\s*the\s*World|SOTW)\b/gi;
-    
     if (forbiddenVendors.test(content)) {
-      console.warn("RulesEngine: Silent Auditor flagged and redacted a vendor name.");
       return content.replace(forbiddenVendors, (match) => {
         const m = match.toLowerCase();
         if (m.includes('sa') || m.includes('sk')) return 'Math';
@@ -183,102 +109,62 @@ export const rulesEngine = {
         return 'Standard Curriculum';
       });
     }
-    
     return content;
   },
 
-  /**
-   * Fix 6: Cidi Labs (DesignPlus) Enforcement
-   * Canvas requires specific structural wrappers (dp-box) and header classes (dp-header).
-   */
   sanitizeForCanvas: (htmlContent: string, title: string): string => {
     if (!htmlContent) return '';
     if (typeof DOMParser === 'undefined') {
-       // Server-side or primitive fallback
        let sanitized = htmlContent;
        if (!sanitized.includes('dp-box')) {
-         sanitized = `<div class="dp-box">\n${sanitized}\n</div>`;
+          sanitized = `<div class="dp-box">\n${sanitized}\n</div>`;
        }
        return sanitized;
     }
-    
     const parser = new DOMParser();
     const doc = parser.parseFromString(htmlContent, 'text/html');
-
-    // Remove prohibited inline styles
     const elements = doc.querySelectorAll('*');
     elements.forEach(el => el.removeAttribute('style'));
-
-    // Enforce dp-header class on all headers
     const headers = doc.querySelectorAll('h1, h2, h3, h4, h5, h6');
-    headers.forEach(h => {
-      h.classList.add('dp-header');
-    });
-
-    // Ensure at least one header exists
+    headers.forEach(h => { h.classList.add('dp-header'); });
     if (headers.length === 0) {
       const header = doc.createElement('h2');
       header.className = 'dp-header';
       header.textContent = title;
       doc.body.insertBefore(header, doc.body.firstChild);
     }
-
-    // Enforce dp-box wrapper
     let finalHtml = doc.body.innerHTML;
     if (!finalHtml.includes('dp-box')) {
       finalHtml = `<div class="dp-box">\n${finalHtml}\n</div>`;
     }
-
     return finalHtml;
   },
 
-  /**
-   * Verifies curriculum accuracy against the Intelligence Engine Pedagogical Rules.
-   */
-  verifyCurriculum: (
-    type: 'math' | 'reading' | 'ela', 
-    identifier: number, 
-    generatedContent: string
-  ): { isValid: boolean; errors: string[] } => {
+  verifyCurriculum: (type: 'math' | 'reading' | 'ela', identifier: number, generatedContent: string): { isValid: boolean; errors: string[] } => {
     const contentLower = generatedContent.toLowerCase();
     const errors: string[] = [];
-
-    // Brevity Mandate Audit with fuzzy matching
     const forbiddenVendors = /\b(Sa[xk]s?t?o[ni]e?|Sh[iu]rl[ey]e?|Story\s*of\s*the\s*World|SOTW)\b/i;
     if (forbiddenVendors.test(generatedContent)) {
         errors.push("Brevity Mandate Violation: Vendor names detected in student-facing content.");
     }
-
     if (type === 'math') {
       const exactMathData = parseMathTest(identifier);
-      if (!contentLower.includes(exactMathData.powerUp.toLowerCase())) {
-        errors.push(`Missing Power Up: ${exactMathData.powerUp}`);
-      }
-      if (!contentLower.includes(exactMathData.factSkill.toLowerCase())) {
-        errors.push(`Missing Fact Skill: ${exactMathData.factSkill}`);
-      }
+      if (!contentLower.includes(exactMathData.powerUp.toLowerCase())) errors.push(`Missing Power Up: ${exactMathData.powerUp}`);
+      if (!contentLower.includes(exactMathData.factSkill.toLowerCase())) errors.push(`Missing Fact Skill: ${exactMathData.factSkill}`);
       return { isValid: errors.length === 0, errors };
     }
-
     if (type === 'reading') {
       const exactReadingData = parseReadingWeek(identifier);
       const benchmark = exactReadingData.fluencyBenchmark;
-      
-      // Reading Checkout Enforcement - Strict prompt alignment
       const expectedGoal = `${benchmark.wpm} words per minute (WPM) with ${benchmark.errorLimit} or fewer errors`;
       if (!contentLower.includes(expectedGoal.toLowerCase()) && !contentLower.includes(`${benchmark.wpm} wpm`)) {
           errors.push(`Reading Checkout Rule Violation: Missing "${expectedGoal}" fluency goal.`);
       }
-
-      if (!contentLower.includes(benchmark.label.toLowerCase())) {
-         errors.push(`Missing fluency benchmark: "${benchmark.label}"`);
-      }
+      if (!contentLower.includes(benchmark.label.toLowerCase())) errors.push(`Missing fluency benchmark: "${benchmark.label}"`);
       return { isValid: errors.length === 0, errors };
     }
-
     return { isValid: errors.length === 0, errors };
   }
 };
 
-// Named exports for compatibility
 export const { generateAssignments, generateFriendlySlug, safeParseNumber, silentAuditor, sanitizeForCanvas } = rulesEngine;

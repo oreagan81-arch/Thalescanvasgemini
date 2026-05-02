@@ -33,7 +33,7 @@ const SUGGESTIONS = [
 ];
 
 export default function AnnouncementCommandCenter() {
-  const { geminiApiKey, canvasApiToken, canvasCourseIds, addRecentCommand } = useStore();
+  const { geminiApiKey, canvasTokenConfigured, canvasCourseIds, addRecentCommand } = useStore();
   const [command, setCommand] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
   const [isPosting, setIsPosting] = useState(false);
@@ -103,7 +103,7 @@ export default function AnnouncementCommandCenter() {
   };
 
   const handlePostToCanvas = async () => {
-    if (!result || selectedCourses.length === 0 || !canvasApiToken) {
+    if (!result || selectedCourses.length === 0 || !canvasTokenConfigured) {
       toast.error("Please select at least one course and ensure announcement is generated.");
       return;
     }

@@ -1,15 +1,25 @@
-// Firebase Cloud Functions for Thales OS API
 import { onSchedule } from "firebase-functions/v2/scheduler";
 import { onCall, CallableRequest, HttpsError } from "firebase-functions/v2/https";
-import { GoogleGenAI } from "@google/genai";
+import { defineSecret } from "firebase-functions/params";
 import * as admin from 'firebase-admin';
+import { GoogleGenAI } from "@google/genai";
 import { Resend } from 'resend';
+import * as crypto from 'crypto';
+import { 
+  PLANNER_SCHEMA, 
+  PARSER_SCHEMA,
+  getParserPrompt, 
+  getGeneratorPrompt 
+} from './prompts';
+import { rulesEngine } from './rulesEngine';
 
-admin.initializeApp();
+if (!admin.apps.length) {
+  admin.initializeApp();
+}
+
 const db = admin.firestore();
-
-// Initialize Gemini
-const genAI = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || "" });
+const canvasApiToken = defineSecret('CANVAS_API_TOKEN');
+const genAI = new GoogleGenAI(process.env.GEMINI_API_KEY || "");
 
 /**
  * Never Crash Contract Wrapper
@@ -30,104 +40,384 @@ const neverCrash = (handler: (request: CallableRequest<any>) => Promise<any>) =>
     });
 };
 
-/** Nightly Canvas file sync */
-export const syncCanvasFiles = onSchedule("0 2 * * *", async (event) => {
-    console.log("Syncing Canvas files...");
-});
+async function canvasRequest(path: string, method: string, body: any, token: string) {
+  const url = `https://thalesacademy.instructure.com/api/v1/${path}`;
+  const maxRetries = 3;
+  let lastError: any = null;
+
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    try {
+      if (attempt > 0) {
+        // Exponential backoff: 2s, 4s, 8s...
+        const backoffMs = Math.pow(2, attempt) * 1000;
+        console.log(`[CANVAS API] Retry attempt ${attempt} for ${path}. Waiting ${backoffMs}ms...`);
+        await new Promise(resolve => setTimeout(resolve, backoffMs));
+      }
+
+      const res = await fetch(url, {
+        method,
+        headers: { 
+          'Authorization': `Bearer ${token}`, 
+          'Content-Type': 'application/json' 
+        },
+        body: body ? JSON.stringify(body) : undefined,
+      });
+
+      if (res.ok) {
+        return await res.json();
+      }
+
+      const status = res.status;
+      const errorText = await res.text();
+      lastError = new Error(`Canvas API error: ${status} ${errorText}`);
+
+      // Retry on 429 (Rate Limit) or 5xx (Server Errors)
+      if (status === 429 || (status >= 500 && status <= 599)) {
+        console.warn(`[CANVAS API] Transient error ${status} on attempt ${attempt + 1}. Retrying...`);
+        continue;
+      }
+
+      // Permanent errors (400 Bad Request, 401 Unauthorized, 404 Not Found) - do not retry
+      throw lastError;
+
+    } catch (error: any) {
+      // If we threw inside the block (e.g. permanent error), re-throw immediately
+      if (error.message.includes('Canvas API error')) {
+        throw error;
+      }
+
+      // Network errors (fetch failures) are worth retrying
+      lastError = error;
+      console.error(`[CANVAS API] Network error on attempt ${attempt + 1}: ${error.message}`);
+      if (attempt === maxRetries - 1) throw lastError;
+    }
+  }
+
+  throw lastError || new Error(`Canvas API failed after ${maxRetries} attempts`);
+}
 
 /**
- * Server-side AI Generation
+ * Generates a SHA-256 hash.
  */
-export const generateAIResponse = neverCrash(async (request: CallableRequest<any>) => {
-    if (!request.auth) {
-        throw new Error("Authentication required.");
-    }
+function generateHash(input: string): string {
+  return crypto.createHash('sha256').update(input).digest('hex');
+}
 
-    const { prompt } = request.data;
-    if (!prompt) {
-        throw new Error("Prompt missing.");
-    }
+/**
+ * Creates a job tracking document in Firestore with an optional specific ID for locking.
+ */
+async function createJob(userId: string, type: string, customId?: string) {
+  const jobRef = customId ? db.collection('jobs').doc(customId) : db.collection('jobs').doc();
+  const jobId = jobRef.id;
 
-    const response = await genAI.models.generateContent({
-        model: "gemini-2.0-flash",
-        contents: prompt
-    });
-    return { result: response.text };
+  // Check if job already exists and is active (Locking)
+  if (customId) {
+    const snap = await jobRef.get();
+    if (snap.exists()) {
+      const data = snap.data();
+      if (data?.status === 'pending' || data?.status === 'processing') {
+        console.log(`[LOCK] Ongoing job found: ${jobId}`);
+        return jobId;
+      }
+    }
+  }
+
+  await jobRef.set({
+    id: jobId,
+    userId,
+    type,
+    status: 'pending',
+    progress: 0,
+    createdAt: admin.firestore.FieldValue.serverTimestamp(),
+    updatedAt: admin.firestore.FieldValue.serverTimestamp()
+  });
+  return jobId;
+}
+
+/**
+ * Updates an existing job's status.
+ */
+async function updateJob(jobId: string, updates: any) {
+  await db.collection('jobs').doc(jobId).update({
+    ...updates,
+    updatedAt: admin.firestore.FieldValue.serverTimestamp()
+  });
+}
+
+export const startAiPlanGeneration = onCall(async (request: CallableRequest<any>) => {
+  if (!request.auth) throw new HttpsError("unauthenticated", "Auth required.");
+  
+  const { rawText, existingState, historicalContext, weekId, quarter } = request.data;
+  if (!rawText) throw new HttpsError("invalid-argument", "Raw text is required.");
+
+  const userId = request.auth.uid;
+  // Hash includes context for idempotency
+  const inputHash = generateHash(`${userId}_${rawText}_${JSON.stringify(existingState || {})}_${JSON.stringify(historicalContext || {})}`);
+  
+  // 1. CACHE CHECK
+  const existingJobSnap = await db.collection('jobs').doc(inputHash).get();
+  if (existingJobSnap.exists()) {
+    const jobData = existingJobSnap.data();
+    if (jobData?.status === 'completed') {
+      console.log(`[CACHE HIT] Returning existing result for ${inputHash}`);
+      return { jobId: inputHash, status: 'completed', result: jobData.result };
+    }
+  }
+
+  const jobId = await createJob(userId, 'AI_PLAN', inputHash);
+
+  // Check if we should actually start it
+  const jobSnap = await db.collection('jobs').doc(jobId).get();
+  const jobData = jobSnap.data();
+  if (jobData?.status === 'processing') {
+    return { jobId, status: jobData.status };
+  }
+
+  // Trigger processing asynchronously
+  (async () => {
+    try {
+      await updateJob(jobId, { status: 'processing', progress: 10 });
+      
+      const stateStr = existingState ? JSON.stringify(existingState) : undefined;
+      const historyStr = historicalContext ? JSON.stringify(historicalContext) : undefined;
+      
+      // AGENT 1: PARSER (Flash) - High volume extraction
+      await updateJob(jobId, { progress: 20 });
+      const parserModel = genAI.getGenerativeModel({ 
+        model: "gemini-1.5-flash",
+        generationConfig: { responseMimeType: "application/json", responseSchema: PARSER_SCHEMA as any }
+      });
+      const parserResult = await parserModel.generateContent(getParserPrompt(rawText));
+      const rawTextResult = parserResult.response.text();
+      const rawItems = JSON.parse(rawTextResult).items || [];
+
+      // AGENT 2: PLANNER (JS Rules Engine) - Structural integrity
+      await updateJob(jobId, { progress: 40 });
+      let structuralPlan = rulesEngine.buildStructuralWeek(rawItems, weekId || 'Unknown', quarter || 1);
+      
+      // Merge with existing state if present (Diffing)
+      if (existingState && existingState.days) {
+         structuralPlan.days = structuralPlan.days.map((day: any) => {
+           const existingDay = existingState.days.find((d: any) => d.day === day.day);
+           if (existingDay) {
+             // Preserve lessons that were already in the state if they still make sense
+             return existingDay;
+           }
+           return day;
+         });
+      }
+
+      // AGENT 3: GENERATOR (Gemini Pro) - Deep academic content
+      await updateJob(jobId, { progress: 65 });
+      const generatorModel = genAI.getGenerativeModel({ 
+        model: "gemini-1.5-pro",
+        generationConfig: { responseMimeType: "application/json", responseSchema: PLANNER_SCHEMA as any }
+      });
+      const generatorResult = await generatorModel.generateContent(getGeneratorPrompt(JSON.stringify(structuralPlan)));
+      const enrichedText = generatorResult.response.text();
+      let enrichedPlan = JSON.parse(enrichedText);
+
+      // AGENT 4: VALIDATOR (JS Logic) - Rule enforcement
+      await updateJob(jobId, { progress: 90 });
+      const validation = rulesEngine.validateThalesRules(enrichedPlan as any);
+      
+      // Deterministic sanitize (Vendor stripping)
+      enrichedPlan.days = enrichedPlan.days.map((day: any) => ({
+        ...day,
+        lessons: (day.lessons || []).map((lesson: any) => ({
+          ...lesson,
+          lessonTitle: lesson.lessonTitle.replace(/Saxon|Shurley|SOTW/gi, 'Standard').trim(),
+          lesson: lesson.lesson?.replace(/Saxon|Shurley|SOTW/gi, 'Standard').trim(), // Handle both field names if varied
+          objectives: (lesson.objectives || []).map((obj: string) => obj.replace(/Saxon|Shurley|SOTW/gi, 'Standard'))
+        }))
+      }));
+
+      await updateJob(jobId, { 
+        status: 'completed', 
+        progress: 100, 
+        result: enrichedPlan,
+        metadata: { validationErrors: validation.errors }
+      });
+    } catch (e: any) {
+      console.error("[MULTI-AGENT FLOW FAILED]", e);
+      await updateJob(jobId, { status: 'failed', error: e.message || "Unknown processing error" });
+    }
+  })();
+
+  return { jobId };
 });
 
-export const deployPages = neverCrash(async (request: CallableRequest<any>) => {
-    const weekId = request.data.weekId;
-    console.log("Deploying pages for week", weekId);
+export const deployPages = onCall({ secrets: [canvasApiToken] }, async (request: CallableRequest<any>) => {
+  if (!request.auth) throw new HttpsError("unauthenticated", "Auth required.");
+  const { pages } = request.data;
+  const token = canvasApiToken.value();
+  
+  if (!Array.isArray(pages)) {
+    throw new HttpsError("invalid-argument", "The 'pages' argument must be an array.");
+  }
+
+  const deployed = [];
+  for (const page of pages) {
+    // Implement per-page lock to prevent duplicates
+    const lockKey = generateHash(`deploy_${page.courseId}_${page.title}`);
+    const lockRef = db.collection('locks').doc(lockKey);
     
-    // 1. Fetch rows
-    const rowsSnap = await db.collection('planner_rows').where('weekId', '==', weekId).get();
-    const rows = rowsSnap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+    try {
+      await db.runTransaction(async (transaction) => {
+        const snap = await transaction.get(lockRef);
+        if (snap.exists()) {
+          const data = snap.data()!;
+          const expiresAt = data.expiresAt.toDate();
+          if (expiresAt > new Date()) {
+            throw new Error(`Deployment lock already held for ${page.title}`);
+          }
+        }
+        transaction.set(lockRef, {
+          courseId: page.courseId,
+          title: page.title,
+          expiresAt: admin.firestore.FieldValue.serverTimestamp() // We'll update this to a proper timestamp after the write
+        });
+      });
 
-    // 2. Fetch resources
-    const resourcesSnap = await db.collection('resources').get();
-    const resources = resourcesSnap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      const result = await canvasRequest(`courses/${page.courseId}/pages`, 'POST', {
+        wiki_page: { title: page.title || 'Weekly Agenda', body: page.html, published: false }
+      }, token);
+      
+      deployed.push(result.title);
 
-    // Helper to resolve resource
-    const resolveResource = (resName: string) => {
-        const match = resources.find(r => 
-            (r as any).cleanName.toLowerCase() === resName.toLowerCase() || 
-            (r as any).rawName.toLowerCase() === resName.toLowerCase()
-        );
-        return match ? (match as any).canvasUrl : null;
-    };
+      // Keep lock for 5 mins to prevent accidental double-clicks causing immediate duplicates
+      await lockRef.update({
+        expiresAt: new Date(Date.now() + 5 * 60 * 1000)
+      });
 
-    // 3. Construct HTML content with resources
-    let htmlContent = `<h1>Plan for Week ${weekId}</h1>`;
-    rows.sort((a,b) => (a as any).order - (b as any).order).forEach((row: any) => {
-        htmlContent += `
-            <div class="dp-box">
-                <h2 class="dp-header">${row.day} - ${row.subject}</h2>
-                <p>Lesson: ${row.lessonTitle}</p>
-                <div class="resources">
-                    <h3>Resources</h3>
-                    <ul>
-                        ${row.resources?.map((res: string) => {
-                            const url = resolveResource(res);
-                            return url ? `<li><a href="${url}">${res}</a></li>` : `<li>${res}</li>`;
-                        }).join('')}
-                    </ul>
-                </div>
-            </div>
-        `;
-    });
-
-    // 4. Update or Create CanvasPage document
-    const canvasPageRef = db.collection('canvas_pages').doc(weekId);
-    await canvasPageRef.set({
-        weekId,
-        htmlContent,
-        status: 'Draft',
-        updatedAt: new Date().toISOString()
-    });
-
-    return { success: true, processed: rows.length };
+    } catch (error: any) {
+      console.error(`Failed to deploy page or lock held: ${error.message}`);
+    }
+  }
+  return { success: true, deployed: deployed.length, titles: deployed };
 });
 
-export const deployAssignments = neverCrash(async (request: CallableRequest<any>) => {
-    const weekId = request.data.weekId;
-    console.log("Deploying assignments for week", weekId);
-    return { success: true };
+export const deployAssignments = onCall({ secrets: [canvasApiToken] }, async (request: CallableRequest<any>) => {
+  if (!request.auth) throw new HttpsError("unauthenticated", "Auth required.");
+  const token = canvasApiToken.value();
+  const { assignments } = request.data;
+
+  if (!Array.isArray(assignments)) {
+    throw new HttpsError("invalid-argument", "The 'assignments' argument must be an array.");
+  }
+
+  const results = [];
+  for (const assign of assignments) {
+    // Lock per assignment to prevent duplicates
+    const lockKey = generateHash(`assign_${assign.courseId}_${assign.title}`);
+    const lockRef = db.collection('locks').doc(lockKey);
+
+    try {
+      await db.runTransaction(async (transaction) => {
+        const snap = await transaction.get(lockRef);
+        if (snap.exists()) {
+          const data = snap.data()!;
+          if (data.expiresAt.toDate() > new Date()) {
+            throw new Error(`Lock held for assignment ${assign.title}`);
+          }
+        }
+        transaction.set(lockRef, {
+          type: 'assignment',
+          expiresAt: admin.firestore.FieldValue.serverTimestamp()
+        });
+      });
+
+      const res = await canvasRequest(`courses/${assign.courseId}/assignments`, 'POST', {
+        assignment: { 
+          name: assign.title, 
+          points_possible: assign.points, 
+          published: false,
+          description: assign.description || ""
+        }
+      }, token);
+      
+      await db.collection('assignments').doc(assign.id).update({
+        status: 'Deployed', 
+        canvasId: res.id.toString(),
+        updatedAt: admin.firestore.FieldValue.serverTimestamp()
+      });
+
+      await lockRef.update({ expiresAt: new Date(Date.now() + 5 * 60 * 1000) });
+      results.push(res.id);
+    } catch (error: any) {
+      console.error(`Assignment deploy skip: ${error.message}`);
+    }
+  }
+  return { success: true, count: results.length };
 });
 
-export const deployAnnouncements = neverCrash(async (request: CallableRequest<any>) => {
-    const weekId = request.data.weekId;
-    console.log("Deploying announcements for week", weekId);
-    return { success: true };
+export const deployAnnouncements = onCall({ secrets: [canvasApiToken] }, async (request: CallableRequest<any>) => {
+  if (!request.auth) throw new HttpsError("unauthenticated", "Auth required.");
+  const token = canvasApiToken.value();
+  const { announcements } = request.data;
+
+  if (!Array.isArray(announcements)) {
+    throw new HttpsError("invalid-argument", "The 'announcements' argument must be an array.");
+  }
+
+  for (const ann of announcements) {
+    // Lock per announcement
+    const lockKey = generateHash(`ann_${ann.courseId}_${ann.title}`);
+    const lockRef = db.collection('locks').doc(lockKey);
+
+    try {
+      await db.runTransaction(async (transaction) => {
+        const snap = await transaction.get(lockRef);
+        if (snap.exists() && snap.data()!.expiresAt.toDate() > new Date()) {
+          throw new Error("Lock held");
+        }
+        transaction.set(lockRef, { expiresAt: admin.firestore.FieldValue.serverTimestamp() });
+      });
+
+      await canvasRequest(`courses/${ann.courseId}/discussion_topics`, 'POST', {
+        title: ann.title, 
+        message: ann.content, 
+        is_announcement: true, 
+        published: true
+      }, token);
+      
+      await db.collection('announcements').doc(ann.id).update({ 
+        status: 'Posted',
+        updatedAt: admin.firestore.FieldValue.serverTimestamp()
+      });
+
+      await lockRef.update({ expiresAt: new Date(Date.now() + 5 * 60 * 1000) });
+    } catch (error: any) {
+      console.error(`Announcement deploy skip: ${error.message}`);
+    }
+  }
+  return { success: true };
 });
 
-export const generateNewsletter = neverCrash(async (request: CallableRequest<any>) => {
-    console.log("Generating newsletter");
-    return { success: true };
+export const generateAIResponse = onCall(async (request: CallableRequest<any>) => {
+  if (!request.auth) throw new HttpsError("unauthenticated", "Auth required.");
+  const { prompt } = request.data;
+  if (!prompt) throw new HttpsError("invalid-argument", "Prompt is required.");
+
+  const model = genAI.getGenerativeModel({ model: "gemini-3-flash-preview" });
+  const result = await model.generateContent(prompt);
+  return { result: result.response.text() };
 });
 
-export const runWeekValidator = neverCrash(async (request: CallableRequest<any>) => {
-    return { valid: true, errors: [] };
+export const runWeekValidator = onCall(async (request: CallableRequest<any>) => {
+  if (!request.auth) throw new HttpsError("unauthenticated", "Auth required.");
+  const { weekId } = request.data;
+  const snapshot = await db.collection('planner_rows').where('weekId', '==', weekId).get();
+  const errors = [];
+  if (snapshot.empty) errors.push(`No data found for week ${weekId}.`);
+  return { valid: errors.length === 0, errors };
 });
+
+export const generateNewsletter = onCall(async (request: CallableRequest<any>) => {
+    if (!request.auth) throw new HttpsError("unauthenticated", "Auth required.");
+    return { success: true, message: "Newsletter stub updated with auth check." };
+});
+
 
 /**
  * 1. Admin Notifications: Friday Deploy Sync
@@ -254,7 +544,6 @@ export const morningDigest = onSchedule("0 5 * * 1-5", async (event) => {
     const lessonList = rows.map(r => `${r.subject}: ${r.lessonTitle}`).join('\n');
 
     // 2. AI Encouraging Brief via Gemini
-    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
     const aiPrompt = `
         You are a supportive academic assistant for Thales Academy. 
         Here is the lesson plan for today (${dateStr}):
@@ -264,6 +553,7 @@ export const morningDigest = onSchedule("0 5 * * 1-5", async (event) => {
         Focus on the value of the topics being taught today. Keep it professional and uplifting.
     `;
 
+    const model = genAI.getGenerativeModel({ model: "gemini-3-flash-preview" });
     const result = await model.generateContent(aiPrompt);
     const brief = result.response.text();
 
@@ -435,7 +725,6 @@ export const classifyCanvasFiles = neverCrash(async (request: CallableRequest<an
 
     // 2. AI Inference via Gemini
     console.log(`[Classifier] Cache miss for ${filename}. Querying Gemini...`);
-    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
     
     const prompt = `
         You are an expert academic data classifier for Thales Academy.
@@ -452,9 +741,9 @@ export const classifyCanvasFiles = neverCrash(async (request: CallableRequest<an
         }
     `;
 
+    const model = genAI.getGenerativeModel({ model: "gemini-3-flash-preview" });
     const result = await model.generateContent(prompt);
-    const response = await result.response;
-    const text = response.text();
+    const text = result.response.text();
     
     // Clean and Parse JSON
     try {

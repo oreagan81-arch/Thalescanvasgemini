@@ -37,7 +37,7 @@ import {
 export default function CanvasPages() {
   const { user } = useAuth();
   const navigate = useNavigate();
-  const { plannerData, canvasCourseIds, addLog, canvasApiToken } = useStore();
+  const { plannerData, canvasCourseIds, addLog, canvasTokenConfigured } = useStore();
   
   // State for UI management
   const [syncingWeek, setSyncingWeek] = useState<string | null>(null);
@@ -52,7 +52,7 @@ export default function CanvasPages() {
    */
   const handleSyncError = (error: any, weekId: string) => {
     console.error(error);
-    const isTokenError = error.message?.includes('401') || !canvasApiToken;
+    const isTokenError = error.message?.includes('401') || !canvasTokenConfigured;
 
     toast.error(isTokenError ? "Canvas Authentication Failed" : `Sync Error: ${weekId}`, {
       description: isTokenError 
