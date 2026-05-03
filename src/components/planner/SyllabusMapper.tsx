@@ -22,8 +22,10 @@ import {
 } from 'lucide-react';
 
 import { useThalesStore } from '@/src/store';
-import { pacingImportService, PacingWeek } from '@/src/services/service.pacingImport';
-import { rulesEngine } from '@/src/lib/thales/rulesEngine';
+import { pacingImportService, PacingWeek, PacingDay } from '@/src/services/service.pacingImport';
+
+import { db, auth, functions } from '@/src/lib/firebase';
+import { httpsCallable } from 'firebase/functions';
 
 export const SyllabusMapper: React.FC<{ weekId?: string }> = () => {
   const store = useThalesStore();
@@ -32,8 +34,51 @@ export const SyllabusMapper: React.FC<{ weekId?: string }> = () => {
   const [selectedWeek, setSelectedWeek] = useState<number>(1);
   const [isProcessing, setIsProcessing] = useState(false);
   const [previewData, setPreviewData] = useState<PacingWeek[] | null>(null);
+  const [auditResults, setAuditResults] = useState<{ week: number; errors: string[] }[]>([]);
   const [error, setError] = useState<string | null>(null);
   const fileInputRef = React.useRef<HTMLInputElement>(null);
+
+  const runAudit = async (data: PacingWeek[]) => {
+    try {
+      const itemsToAudit: any[] = [];
+      data.forEach(week => {
+        const firstDay = (week.days[0] || {}) as PacingDay;
+        const mathLesson = firstDay.mathLesson ?? '';
+        const mathTestNumRaw = typeof mathLesson === 'string' 
+          ? mathLesson.toLowerCase().match(/test\s*(\d+)/)?.[1] 
+          : null;
+        
+        if (mathTestNumRaw) {
+          const num = parseInt(mathTestNumRaw, 10);
+          if (!isNaN(num)) {
+            itemsToAudit.push({
+              type: 'math',
+              identifier: num,
+              content: mathLesson,
+              weekNumber: week.weekNumber
+            });
+          }
+        }
+      });
+
+      if (itemsToAudit.length > 0) {
+        const auditFn = httpsCallable(functions, 'auditCurriculum');
+        const { data: result } = await auditFn({ items: itemsToAudit }) as any;
+        
+        if (result.success && result.results) {
+          const mappedErrors = result.results
+            .filter((r: any) => !r.audit.isValid)
+            .map((r: any) => ({
+              week: r.weekNumber,
+              errors: r.audit.errors
+            }));
+          setAuditResults(mappedErrors);
+        }
+      }
+    } catch (err) {
+      console.warn("[DIAGNOSTIC] Audit failed:", err);
+    }
+  };
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -76,6 +121,7 @@ export const SyllabusMapper: React.FC<{ weekId?: string }> = () => {
         
         const data = pacingImportService.parse(rawContent);
         setPreviewData(data);
+        runAudit(data);
         toast.success("Successfully synced from Google Sheet!");
     } catch (err: any) {
         setError(err.message || "Failed to auto-sync.");
@@ -83,49 +129,6 @@ export const SyllabusMapper: React.FC<{ weekId?: string }> = () => {
         setIsProcessing(false);
     }
   };
-
-  const auditResults = useMemo(() => {
-    if (!previewData || !Array.isArray(previewData)) return [];
-    
-    try {
-      return previewData.map((week, index) => {
-        if (!week) {
-          console.warn(`[DIAGNOSTIC] Null week entry at index ${index}`);
-          return null;
-        }
-        const audits: { type: 'math' | 'reading' | 'ela', errors: string[] }[] = [];
-
-        // Math Audit
-        const firstDay = week.days[0] || {};
-        const mathLesson = firstDay.mathLesson ?? '';
-        const mathTestNumRaw = typeof mathLesson === 'string' 
-          ? mathLesson.toLowerCase().match(/test\s*(\d+)/)?.[1] 
-          : null;
-        
-        if (mathTestNumRaw) {
-          const num = parseInt(mathTestNumRaw, 10);
-          if (!isNaN(num)) {
-            try {
-              const audit = rulesEngine.verifyCurriculum('math', num, mathLesson);
-              if (audit && !audit.isValid && Array.isArray(audit.errors)) {
-                audits.push({ type: 'math', errors: audit.errors });
-              }
-            } catch (auditErr) {
-              console.warn(`[DIAGNOSTIC] Rules engine failure at week ${week.weekNumber}:`, auditErr);
-            }
-          }
-        }
-
-        // Reading/ELA Audit placeholders (defensive)
-        // ... (can add more if rulesEngine supports them)
-
-        return audits.length > 0 ? { week: week.weekNumber ?? index, errors: audits.flatMap(a => a.errors) } : null;
-      }).filter((a): a is { week: number; errors: string[] } => a !== null);
-    } catch (err) {
-      console.warn("[DIAGNOSTIC] auditResults calculation failed entirely:", err);
-      return [];
-    }
-  }, [previewData]);
 
   const handleImport = async () => {
     if (!rawText.trim()) return;
@@ -139,6 +142,7 @@ export const SyllabusMapper: React.FC<{ weekId?: string }> = () => {
 
       const data = pacingImportService.parse(rawText);
       setPreviewData(data);
+      runAudit(data);
     } catch (err: any) {
       setError(err.message || "Failed to parse curriculum.");
     } finally {

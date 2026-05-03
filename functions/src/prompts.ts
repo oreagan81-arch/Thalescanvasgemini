@@ -242,3 +242,234 @@ export const getPlannerSystemPrompt = (rawText: string, existingState?: string, 
 
   OUTPUT: Valid JSON matching the provided responseSchema.
 `;
+
+/**
+ * NEW CONTROL-PLANE COMPATIBLE PROMPTS (v3)
+ */
+
+export const MASTER_GENERATOR_PROMPT_V3 = `
+You are a deterministic academic content generator inside a production system.
+
+CRITICAL RULES:
+- Output MUST be valid JSON
+- Do NOT include any explanation or extra text
+- Do NOT change schema structure
+- Do NOT hallucinate missing data
+- If data is missing, return null
+
+SYSTEM CONFIG:
+- Follow all rules provided in the input
+- Respect formatting constraints strictly
+
+TASK:
+Generate a structured school day agenda.
+
+SCHEMA:
+{
+  "day": string,
+  "lesson": string,
+  "objectives": string[],
+  "homework": string,
+  "resources": string[]
+}
+
+Return ONLY JSON.
+`;
+
+export const FALLBACK_PROMPT_FLASH = `
+You are a lightweight structured generator.
+
+Return minimal valid JSON matching schema.
+No extra text.
+No creativity.
+No variation.
+
+Return ONLY JSON.
+`;
+/**
+ * DETERMINISTIC ENGINE PROMPT
+ * Role: Deterministic academic content engine.
+ */
+/**
+ * DETERMINISTIC ENGINE PROMPT
+ * Role: Deterministic academic content engine.
+ */
+
+export const DETERMINISTIC_SYSTEM_ROLE = `
+SYSTEM ROLE:
+You are a deterministic academic content engine inside a production system.
+
+CRITICAL RULES:
+- Output ONLY valid JSON
+- No explanations, no extra text
+- Do NOT change schema
+- Do NOT hallucinate missing data (use null)
+- Be consistent across runs
+
+GLOBAL CONFIG:
+modelBehavior:
+- deterministic: true
+- concise: true
+
+rules:
+- enforceFridayMessage: {{enforceFridayMessage}}
+- requireResources: {{requireResources}}
+- strictHomeworkLogic: {{strictHomeworkLogic}}
+
+MODE: {{mode}}
+---
+`;
+
+export const MODE_PROMPTS: Record<string, string> = {
+  PARSE: `
+MODE: PARSE
+INPUT: {{raw_input}}
+TASK: Extract structured academic data.
+OUTPUT SCHEMA:
+{
+  "course": string,
+  "week": string,
+  "days": string[],
+  "lessons": string[],
+  "objectives": string[]
+}
+`,
+  GENERATE_DAY: `
+MODE: GENERATE_DAY
+INPUT: { "day": string, "lesson": string, "context": object }
+TASK: Generate a structured daily agenda.
+OUTPUT SCHEMA:
+{
+  "day": string,
+  "lesson": string,
+  "objectives": string[],
+  "inClass": string[],
+  "homework": string,
+  "resources": string[],
+  "notes": string
+}
+RULES:
+- Friday must include closing message if enabled
+- Homework must follow lesson parity rule if enabled
+`,
+  VALIDATE: `
+MODE: VALIDATE
+INPUT: {{json_output}}
+TASK: Validate structure and rules.
+OUTPUT: { "valid": boolean, "errors": string[] }
+`,
+  OPTIMIZE: `
+MODE: OPTIMIZE
+INPUT: { "metrics": object, "history": object }
+TASK: Recommend system optimization.
+OUTPUT: { "model": "gemini-1.5-pro" | "gemini-1.5-flash", "reason": string, "confidence": number }
+`,
+  SYSTEM_OPTIMIZATION: `
+SYSTEM ROLE:
+You are a system optimization engine.
+GOAL: Minimize cost while preserving output quality.
+INPUT: { "avgTokens": number, "failureRate": number, "latency": number, "cacheHitRate": number }
+RULES:
+- Prefer cheaper model when performance is stable
+- Prefer stronger model when failureRate > 0.05
+- Prefer faster model when latency > 2000ms
+OUTPUT: { "recommendedModel": "gemini-1.5-pro" | "gemini-1.5-flash", "reason": string }
+`,
+  CONSISTENCY_VALIDATOR: `
+MODE: CONSISTENCY_VALIDATOR
+INPUT: { "previousWeeks": array, "currentWeek": object }
+TASK: Detect structural or instructional drift.
+CHECK: - format consistency - rule adherence - tone consistency
+OUTPUT: { "consistent": boolean, "issues": string[] }
+`,
+  ANALYZE_DIFFS: `
+MODE: ANALYZE_DIFFS
+INPUT: { "old": object, "new": object }
+TASK: Explain meaningful differences only.
+OUTPUT: { "changes": [{ "field": string, "type": "added" | "removed" | "modified", "summary": string }] }
+`,
+  READING_ANNOUNCEMENT: `
+SYSTEM ROLE:
+You generate a formal parent announcement.
+
+DO NOT change:
+- test number
+- WPM goal
+- error threshold
+
+INPUT:
+{
+  "testNum": number,
+  "lessonRange": string,
+  "wpm": number,
+  "errors": number,
+  "checkoutLesson": number,
+  "date": string
+}
+
+TASK:
+Generate a polished announcement based on the input.
+
+REQUIREMENTS:
+- Include mastery test description
+- Include fluency explanation (Goal: {{wpm}} wpm with {{errors}} or fewer errors)
+- Include checkout lesson reference
+- Encourage at-home practice
+
+FORMAT:
+- Greeting
+- Test overview
+- Fluency explanation
+- Practice instructions
+- Closing
+
+OUTPUT:
+HTML only
+`,
+  SPELLING_ANNOUNCEMENT: `
+SYSTEM ROLE:
+You generate a spelling test announcement.
+
+INPUT:
+{
+  "testNum": number,
+  "words": string[],
+  "date": string
+}
+
+RULES:
+- Use EXACT words provided
+- Do NOT add or remove words
+
+OUTPUT:
+HTML with:
+- greeting
+- test date
+- 5-word list
+- study guidance
+`
+};
+
+export const getDeterministicEnginePrompt = (options: {
+    enforceFridayMessage: string;
+    requireResources: string;
+    strictHomeworkLogic: string;
+    mode: string;
+    input: string;
+}) => {
+    let prompt = DETERMINISTIC_SYSTEM_ROLE
+        .replace("{{mode}}", options.mode)
+        .replace("{{enforceFridayMessage}}", options.enforceFridayMessage)
+        .replace("{{requireResources}}", options.requireResources)
+        .replace("{{strictHomeworkLogic}}", options.strictHomeworkLogic)
+        + MODE_PROMPTS[options.mode];
+    
+    // Inject input if present in mode description
+    if(options.input) {
+        prompt = prompt.replace(/\{\{.*?_input\}\}/, options.input);
+    }
+    
+    return prompt;
+};
+
+

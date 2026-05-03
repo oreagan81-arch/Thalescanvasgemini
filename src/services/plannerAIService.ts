@@ -36,8 +36,10 @@ export const plannerAIService = {
    * STAGE 2: VALIDATE (Rules Engine)
    * Enforces Thales Invariants and the Brevity Mandate.
    */
-  validate(data: AIPlannerResult): { isValid: boolean; errors: string[]; sanitized: AIPlannerResult } {
+  async validate(data: AIPlannerResult): Promise<{ isValid: boolean; errors: string[]; sanitized: AIPlannerResult }> {
     const errors: string[] = [];
+    const itemsToAudit: any[] = [];
+
     const sanitized: AIPlannerResult = {
       ...data,
       days: data.days.map(d => {
@@ -45,7 +47,7 @@ export const plannerAIService = {
         const cleanLesson = rulesEngine.silentAuditor(d.lesson || "");
         const cleanHomework = rulesEngine.silentAuditor(d.homework || "");
         
-        // Curriculum Specific Verification
+        // Prepare list for bulk audit
         const subjectType = (data.course || "").toLowerCase().includes('math') ? 'math' :
                            (data.course || "").toLowerCase().includes('reading') ? 'reading' :
                            (data.course || "").toLowerCase().includes('english') || (data.course || "").toLowerCase().includes('ela') ? 'ela' : null;
@@ -53,8 +55,12 @@ export const plannerAIService = {
         if (subjectType) {
           const lessonMatch = (d.lesson || "").match(/\d+/);
           if (lessonMatch) {
-            const audit = rulesEngine.verifyCurriculum(subjectType as any, parseInt(lessonMatch[0]), d.lesson || "");
-            if (!audit.isValid) errors.push(...audit.errors.map(err => `[${d.day}] ${err}`));
+            itemsToAudit.push({
+              type: subjectType,
+              identifier: parseInt(lessonMatch[0]),
+              content: d.lesson || "",
+              day: d.day
+            });
           }
         }
 
@@ -66,6 +72,24 @@ export const plannerAIService = {
         };
       })
     };
+
+    // Bulk Audit on Server
+    if (itemsToAudit.length > 0) {
+      try {
+        const auditFn = httpsCallable(functions, 'auditCurriculum');
+        const { data: result } = await auditFn({ items: itemsToAudit }) as any;
+        if (result.success && result.results) {
+          result.results.forEach((r: any) => {
+            if (!r.audit.isValid) {
+              const auditItem = itemsToAudit.find(orig => orig.identifier === r.identifier && orig.type === r.type);
+              errors.push(...r.audit.errors.map((err: string) => `[${auditItem?.day || 'Audit'}] ${err}`));
+            }
+          });
+        }
+      } catch (err) {
+        console.warn("[VALIDATION] Audit failed:", err);
+      }
+    }
 
     return {
       isValid: errors.length === 0,

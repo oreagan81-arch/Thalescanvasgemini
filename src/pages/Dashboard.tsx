@@ -10,13 +10,17 @@ import { RecentActivity } from '../components/dashboard/RecentActivity';
 import { StatusSection } from '../components/dashboard/StatusSection';
 import { MissingAssetAlarms } from '../components/dashboard/MissingAssetAlarms';
 import { calculatePacingWeek } from '../services/service.calendar';
+import { useAlerts } from '../hooks/hook.useAlerts';
 import { Alert, AlertDescription, AlertTitle } from '../../components/ui/alert';
-import { Sparkles, ArrowRight } from 'lucide-react';
+import { Sparkles, ArrowRight, AlertTriangle, Info, XCircle } from 'lucide-react';
 import { Button } from '../../components/ui/button';
 import { Link } from 'react-router-dom';
+import { doc, updateDoc } from 'firebase/firestore';
+import { db } from '../lib/firebase';
 
 export function Dashboard() {
   useAutoDraft();
+  const { alerts } = useAlerts();
   const selectedWeek = useStore((state) => state.selectedWeek);
   const pendingNewsletterDraft = useStore((state) => state.pendingNewsletterDraft);
   const setPendingNewsletterDraft = useStore((state) => state.setPendingNewsletterDraft);
@@ -78,6 +82,27 @@ export function Dashboard() {
         schoolWeek={schoolWeek}
         schoolStatus={schoolStatus}
       />
+
+      {/* Alerts Section - Proactive Signal */}
+      {alerts.map((alert) => (
+        <Alert key={alert.id} className={`${alert.severity === 'error' ? 'bg-red-500/10 border-red-500/20 text-red-700' : alert.severity === 'warning' ? 'bg-amber-500/10 border-amber-500/20 text-amber-700' : 'bg-blue-500/10 border-blue-500/20 text-blue-700'} mx-4`}>
+          {alert.severity === 'error' ? <XCircle className="h-4 w-4 text-red-600" /> : alert.severity === 'warning' ? <AlertTriangle className="h-4 w-4 text-amber-600" /> : <Info className="h-4 w-4 text-blue-600" />}
+          <AlertTitle className="text-xs font-black uppercase tracking-widest">{alert.severity === 'error' ? 'Critical Alert' : alert.severity === 'warning' ? 'Warning' : 'Information'}</AlertTitle>
+          <AlertDescription className="text-sm flex items-center justify-between mt-2">
+            <span>{alert.message}</span>
+            <Button 
+              variant="outline" 
+              size="sm" 
+              className="h-7 text-[10px] font-bold border-current/30"
+              onClick={async () => {
+                await updateDoc(doc(db, 'alerts', alert.id), { read: true });
+              }}
+            >
+              Dismiss
+            </Button>
+          </AlertDescription>
+        </Alert>
+      ))}
 
       {pendingNewsletterDraft && (
         <Alert className="bg-blue-500/10 border-blue-500/20 text-blue-700 mx-4">

@@ -6,10 +6,17 @@ service cloud.firestore {
     function isSignedIn() { return request.auth != null; }
     function isValidId(id) { return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$'); }
     function isOwner(userId) { return isSignedIn() && request.auth.uid == userId; }
+    function isAdmin() { return isSignedIn() && exists(/databases/$(database)/documents/admins/$(request.auth.uid)); }
 
     // --- Default Deny ---
     match /{document=**} {
       allow read, write: if false;
+    }
+
+    // --- /system_config ---
+    match /system_config/{doc} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
     }
 
     // --- /users ---

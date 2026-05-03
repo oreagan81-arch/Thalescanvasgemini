@@ -13,7 +13,8 @@ import {
   serverTimestamp,
   writeBatch
 } from 'firebase/firestore';
-import { db, auth } from '../lib/firebase';
+import { db, auth, functions } from '../lib/firebase';
+import { httpsCallable } from 'firebase/functions';
 import { handleFirestoreError, OperationType } from '../lib/firestoreErrorHandler';
 import { COURSE_IDS, NOTIFICATION_RECIPIENT } from '../constants';
 import { rulesEngine } from '../lib/thales/rulesEngine';
@@ -138,7 +139,12 @@ export const assignmentService = {
     let writesQueued = 0;
 
     try {
-      // Sync Efficiency: Cache existing rowIds and Assignment titles/subjects for the current week to prevent redundant writes
+      // 1. Get Suggestions from Server (Academic Truth)
+      const suggestFn = httpsCallable(functions, 'suggestAssignments');
+      const { data } = await suggestFn({ plannerRows }) as any;
+      const suggestions = data.suggestions || [];
+
+      // 2. Fetch Existing state for de-duplication
       const existingQ = query(
         collection(db, COLLECTION_NAME), 
         where('userId', '==', userId),
@@ -148,7 +154,7 @@ export const assignmentService = {
       const existingRowIds = new Set(existingSnap.docs.map(d => d.data().rowId));
       const existingAssignmentKeys = new Set(existingSnap.docs.map(d => `${d.data().title}_${d.data().subject}`));
 
-      // 1. Resolve Academic Context for Date calculation
+      // 3. Resolve Dates
       const [qStr, wStr] = weekId.split('_');
       const quarter = parseInt(qStr.substring(1));
       const weekNum = parseInt(wStr.substring(1));
@@ -156,24 +162,12 @@ export const assignmentService = {
       const weekDates = calendarService.getDatesForContext(quarter, weekNum);
 
       for (const row of plannerRows) {
-        // --- Thales Rules Engine: Explicit Blockers ---
-        // 1. History/Science: No assignments ever
-        if (row.subject === 'Science' || row.subject === 'History') continue;
-        
-        // 2. Language Arts: Only CP (Classroom Practice) or Test allowed
-        if (row.subject === 'Language Arts' && !(row.type === 'CP' || row.type === 'Test')) continue;
-
-        // 3. Friday Rule: No homework, only Tests allowed
-        if (row.day === 'Friday' && row.type !== 'Test') continue;
-        // ----------------------------------------------
-
         const rowId = row.id || row.rowId;
-        
-        // Use Thales deterministic rules to generate assignments
-        const generated = rulesEngine.generateAssignments(row);
+        const suggestion = suggestions.find((s: any) => s.rowId === rowId);
+        if (!suggestion || !suggestion.assignments) continue;
 
-        for (const gen of generated) {
-          // Robust deduplication: check both rowId and title/subject
+        for (const gen of suggestion.assignments) {
+          // Robust deduplication
           if (!row.lessonTitle || existingRowIds.has(rowId) || existingAssignmentKeys.has(`${gen.title}_${row.subject}`)) continue;
           
           let targetCourseId = (COURSE_IDS as any)[row.subject] || COURSE_IDS.Homeroom;
@@ -200,9 +194,9 @@ export const assignmentService = {
             weekId,
             rowId,
             subject: row.subject,
-            title: rulesEngine.silentAuditor(gen.title),
+            title: gen.title, // Server already provides auditor-clean title
             courseId: targetCourseId,
-            type: gen.isStudyGuide ? 'Assignment' : 'Assignment', // Distinguish more if needed
+            type: gen.isStudyGuide ? 'Assignment' : 'Assignment',
             points: gen.points,
             gradingType: gen.gradingType,
             omitFromFinalGrade: gen.omitFromFinalGrade,
@@ -212,11 +206,9 @@ export const assignmentService = {
             updatedAt: serverTimestamp(),
           });
           writesQueued++;
-          // Register the new key to prevent duplicates within this same batch
           existingAssignmentKeys.add(`${gen.title}_${row.subject}`);
         }
 
-        // Batch limit is 500
         if (writesQueued >= 450) {
           await batch.commit();
           writesQueued = 0;
@@ -225,7 +217,6 @@ export const assignmentService = {
       
       if (writesQueued > 0) {
         await batch.commit();
-        console.log(`Successfully batched ${writesQueued} assignments.`);
       }
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, COLLECTION_NAME);

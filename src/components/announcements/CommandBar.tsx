@@ -29,7 +29,8 @@ interface CommandBarProps {
 export function CommandBar({ command, setCommand, onRun, loading, chips }: CommandBarProps) {
   const [showSuggestions, setShowSuggestions] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
-  const parsed = commandParser.parse(command);
+  const intent = commandParser.parse(command);
+  const parsed = commandParser.getLegacyMetadata(intent);
 
   // Simple auto-suggestion logic
   const suggestions = command.length > 1 

@@ -43,3 +43,30 @@ export const THALES_PROTOCOL_INVARIANTS = `
 6. **Friday Handshake**: On Fridays, "In Class" instructions are replaced with specific "Friday Completion" checklists.
 7. **Mapping Integrity**: Only valid Course IDs from the registry may be targeted for deployments.
 `;
+
+// --- Reading Test System (Hard-Locked Logic) ---
+export const FLUENCY_BANDS = [
+  { range: [1, 7], wpm: 100, errors: 2 },
+  { range: [8, 10], wpm: 115, errors: 2 },
+  { range: [11, 13], wpm: 130, errors: 2 }
+] as const;
+
+export function resolveFluency(testNum: number) {
+  return FLUENCY_BANDS.find(b =>
+    testNum >= b.range[0] && testNum <= b.range[1]
+  );
+}
+
+// --- HARD MAP (NO DRIFT) ---
+export const READING_TEST_MAP: Record<number, number> = {
+  80: 8,
+  90: 9,
+  100: 10,
+  110: 11,
+  120: 12,
+  130: 13
+};
+
+export function resolveReadingTest(lessonNum: number) {
+  return READING_TEST_MAP[lessonNum] || null;
+}

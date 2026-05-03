@@ -12,7 +12,7 @@ import {
 import { toast } from 'sonner';
 
 import { useStore } from '../../store';
-import { diffEngine, DiffResult } from '../../services/service.diffEngine';
+import { diffEngine } from '../../services/service.diffEngine';
 
 import { Button } from '@/components/ui/button';
 import { 
@@ -37,7 +37,7 @@ export function PlannerSyncDiff({ courseId, courseName }: PlannerSyncDiffProps) 
   const [isOpen, setIsOpen] = useState(false);
   const [isCalculating, setIsCalculating] = useState(false);
   const [isExecuting, setIsExecuting] = useState(false);
-  const [diff, setDiff] = useState<DiffResult | null>(null);
+  const [diff, setDiff] = useState<any | null>(null);
 
   const handleCalculateDiff = async () => {
     if (!canvasTokenConfigured) {
@@ -57,7 +57,7 @@ export function PlannerSyncDiff({ courseId, courseName }: PlannerSyncDiffProps) 
     setIsCalculating(true);
     setDiff(null);
     try {
-      const calculatedDiff = await diffEngine.generateDiff(plannerData, courseId);
+      const calculatedDiff = await diffEngine.getDiffFromServer(plannerData, courseId);
       setDiff(calculatedDiff);
     } catch (error) {
       toast.error(`Analysis failed for ${courseName}.`, {
@@ -74,7 +74,7 @@ export function PlannerSyncDiff({ courseId, courseName }: PlannerSyncDiffProps) 
     
     setIsExecuting(true);
     try {
-      await diffEngine.executeDiff(courseId, diff);
+      await diffEngine.syncToCanvas(plannerData, courseId);
       toast.success(`Synchronized ${courseName}!`);
       setIsOpen(false);
     } catch (error) {

@@ -22,6 +22,8 @@ import { Calendar } from 'lucide-react';
 import { aiAnnouncementService, GeneratedAnnouncement } from '../services/aiAnnouncementService';
 import { canvasApiService } from '../services/canvasApiService';
 import { useStore } from '../store';
+import { db, auth, functions } from '../lib/firebase';
+import { httpsCallable } from 'firebase/functions';
 import { rulesEngine } from '../lib/thales/rulesEngine';
 import { toast } from 'sonner';
 
@@ -74,21 +76,28 @@ export default function AnnouncementCommandCenter() {
 
         // 2. Perform Curriculum Verification (Detect halluncinations)
         const lowerCmd = command.toLowerCase();
-        let verificationResult = { isValid: true, errors: [] as string[] };
+        let auditParams: any = null;
 
         if (lowerCmd.includes('math test')) {
           const match = lowerCmd.match(/math test (\d+)/);
           if (match) {
-            verificationResult = rulesEngine.verifyCurriculum('math', parseInt(match[1]), resp.bodyHTML);
+            auditParams = { type: 'math', identifier: parseInt(match[1]), content: resp.bodyHTML };
           }
         } else if (lowerCmd.includes('reading week')) {
           const match = lowerCmd.match(/reading week (\d+)/);
           if (match) {
-            verificationResult = rulesEngine.verifyCurriculum('reading', parseInt(match[1]), resp.bodyHTML);
+            auditParams = { type: 'reading', identifier: parseInt(match[1]), content: resp.bodyHTML };
           }
         }
 
-        setValidationErrors(verificationResult.errors);
+        if (auditParams) {
+          const auditFn = httpsCallable(functions, 'auditCurriculum');
+          const { data: auditResult } = await auditFn({ items: [auditParams] }) as any;
+          if (auditResult.success && auditResult.results?.[0]) {
+             setValidationErrors(auditResult.results[0].audit.errors);
+          }
+        }
+
         setResult(resp);
         
         // 3. Add to history

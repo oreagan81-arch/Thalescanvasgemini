@@ -67,9 +67,6 @@ export function DashboardLayout() {
     <div className="flex h-screen bg-[#0a0a0c] text-slate-100 overflow-hidden font-sans">
       <CommandCenterBrain 
         jobId={activeJobId} 
-        onComplete={() => {
-           // We might want to keep it visible for a bit or wait for user to dismiss
-        }}
         onReset={() => setActiveJob(null)}
       />
       {/* Sidebar - Linear/Superhuman inspired minimal rail */}

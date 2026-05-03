@@ -14,14 +14,17 @@ import {
   PROMPT_VERSION
 } from './prompts';
 import { rulesEngine } from './rulesEngine';
-import { jobService, JobStatus } from './jobService';
+import { jobService, JobStatus, Job } from './jobService';
+import { AiPipeline } from './core/pipeline';
+import { canvasApiToken, canvasRequest } from './core/canvas';
+import { diffEngine } from './canvas/diffEngine';
 
-if (!admin.apps.length) {
-  admin.initializeApp();
-}
+import { getSystemConfig as getSystemConfigService, updateSystemConfig as updateSystemConfigService } from './control/config';
+import { trackMetrics as trackMetricsService } from './control/metrics';
+import { updateJob, createJob } from './control/jobs';
 
-const db = admin.firestore();
-const canvasApiToken = defineSecret('CANVAS_API_TOKEN');
+import { db } from './lib/db';
+
 const genAI = new GoogleGenAI(process.env.GEMINI_API_KEY || "");
 
 /**
@@ -43,62 +46,6 @@ const neverCrash = (handler: (request: CallableRequest<any>) => Promise<any>) =>
     });
 };
 
-async function canvasRequest(path: string, method: string, body: any, token: string) {
-  const url = `https://thalesacademy.instructure.com/api/v1/${path}`;
-  const maxRetries = 3;
-  let lastError: any = null;
-
-  for (let attempt = 0; attempt < maxRetries; attempt++) {
-    try {
-      if (attempt > 0) {
-        // Exponential backoff: 2s, 4s, 8s...
-        const backoffMs = Math.pow(2, attempt) * 1000;
-        console.log(`[CANVAS API] Retry attempt ${attempt} for ${path}. Waiting ${backoffMs}ms...`);
-        await new Promise(resolve => setTimeout(resolve, backoffMs));
-      }
-
-      const res = await fetch(url, {
-        method,
-        headers: { 
-          'Authorization': `Bearer ${token}`, 
-          'Content-Type': 'application/json' 
-        },
-        body: body ? JSON.stringify(body) : undefined,
-      });
-
-      if (res.ok) {
-        return await res.json();
-      }
-
-      const status = res.status;
-      const errorText = await res.text();
-      lastError = new Error(`Canvas API error: ${status} ${errorText}`);
-
-      // Retry on 429 (Rate Limit) or 5xx (Server Errors)
-      if (status === 429 || (status >= 500 && status <= 599)) {
-        console.warn(`[CANVAS API] Transient error ${status} on attempt ${attempt + 1}. Retrying...`);
-        continue;
-      }
-
-      // Permanent errors (400 Bad Request, 401 Unauthorized, 404 Not Found) - do not retry
-      throw lastError;
-
-    } catch (error: any) {
-      // If we threw inside the block (e.g. permanent error), re-throw immediately
-      if (error.message.includes('Canvas API error')) {
-        throw error;
-      }
-
-      // Network errors (fetch failures) are worth retrying
-      lastError = error;
-      console.error(`[CANVAS API] Network error on attempt ${attempt + 1}: ${error.message}`);
-      if (attempt === maxRetries - 1) throw lastError;
-    }
-  }
-
-  throw lastError || new Error(`Canvas API failed after ${maxRetries} attempts`);
-}
-
 /**
  * Generates a SHA-256 hash.
  */
@@ -109,240 +56,60 @@ function generateHash(input: string): string {
 export const startAiPlanGeneration = onCall(async (request: CallableRequest<any>) => {
   if (!request.auth) throw new HttpsError("unauthenticated", "Auth required.");
   
-  const { rawText, existingState, historicalContext, weekId, quarter, targetDays, force } = request.data;
-  if (!rawText) throw new HttpsError("invalid-argument", "Raw text is required.");
-
-  const userId = request.auth.uid;
-  // Hash includes context and targetDays for idempotency
-  const inputHash = generateHash(`${userId}_${rawText}_${JSON.stringify(existingState || {})}_${JSON.stringify(historicalContext || {})}_${JSON.stringify(targetDays || [])}`);
+  const input = request.data;
+  const config = await getSystemConfigService();
+  const configSnapshot = {
+    model: config.model,
+    promptVersion: config.promptVersion,
+    rules: config.rules
+  };
+  const jobId = await createJob(input, configSnapshot);
   
-  // 1. CACHE CHECK
-  if (!force) {
-    const existingJobSnap = await db.collection('jobs').doc(inputHash).get();
-    if (existingJobSnap.exists()) {
-      const jobData = existingJobSnap.data();
-      if (jobData?.status === JobStatus.COMPLETED) {
-        console.log(`[CACHE HIT] Returning existing result for ${inputHash}`);
-        return { jobId: inputHash, status: JobStatus.COMPLETED, result: jobData.result };
-      }
-    }
-  }
-
-  const jobId = await jobService.getOrCreateJob(userId, 'AI_PLAN', request.data, { customId: inputHash });
-
-  // Trigger processing asynchronously
+  // Asynchronous processing triggered
   (async () => {
-    await jobService.runProcessor(jobId, async (job) => {
-      const intermediate = job.intermediateState || {};
-      
-      await jobService.updateProgress(jobId, { progress: 10 });
-      
-      // AGENT 1 & 2: PARSER & AUDITOR (Deterministic) - No AI, just structure extraction
-      let structuralPlan = intermediate.structuralPlan;
-      if (!structuralPlan) {
-        await jobService.updateProgress(jobId, { progress: 20, intermediateState: { ...intermediate, step: 'PARSER' } });
-        
-        try {
-          if (rawText.trim().startsWith('{')) {
-            const json = JSON.parse(rawText);
-            structuralPlan = {
-              course: json.course || "General",
-              quarter: json.quarter || quarter || 1,
-              week: json.week || weekId || "1",
-              days: json.days || []
-            };
-          } else {
-            structuralPlan = rulesEngine.deterministicParse(rawText, quarter || 1, weekId);
-          }
-        } catch (err) {
-          console.warn("Deterministic parser error, using empty shell", err);
-          structuralPlan = { course: "Thales Curriculum", quarter: quarter || 1, weekId: weekId || "1", days: [] };
-        }
+    try {
+      await updateJob(jobId, { status: "running" });
 
-        await jobService.updateProgress(jobId, { 
-          progress: 35, 
-          intermediateState: { ...intermediate, step: 'AUDIT', structuralPlan } 
-        });
-
-        await jobService.addLog(jobId, {
-          step: 'PARSER_DETERMINISTIC',
-          input: { rawTextLength: rawText.length },
-          output: { structuralPlan }
-        });
+      if (!config.features.enableAI) {
+        throw new Error("AI disabled globally.");
       }
 
-      // AGENT 2: PLANNER (JS Rules Engine) - Structural integrity
-      await jobService.updateProgress(jobId, { progress: 40 });
+      const pipeline = new AiPipeline(process.env.GEMINI_API_KEY || "", jobId, request.auth.uid, config);
+
+      // PARSE INPUT
+      await updateJob(jobId, { progress: 20 });
+      const structuralPlan = await pipeline.parseInput(input.rawText, input.quarter || 1, input.weekId || "1");
       
-      if (existingState && existingState.days && !intermediate.structuralPlan) {
-         structuralPlan.days = structuralPlan.days.map((day: any) => {
-           const existingDay = existingState.days.find((d: any) => d.day === day.day);
-           if (existingDay) {
-             return existingDay;
-           }
-           return day;
-         });
+      // STAGE 2: GENERATE STRUCTURE & CONTENT
+      await updateJob(jobId, { progress: 60 });
+      let finalPlan = await pipeline.buildWeekStructure(structuralPlan);
+      
+      // STAGE 3: DAY PROCESSING (VALIDATION/ENRICHMENT)
+      await updateJob(jobId, { status: "running", progress: 80 });
+      const courseInfo = `${finalPlan.course}, Quarter ${finalPlan.quarter}, Week ${finalPlan.weekId}`;
+      
+      const jobSnapshot = await db.collection('jobs').doc(jobId).get();
+      const jobData = jobSnapshot.data() as Job;
+      const isRetry = (jobData.attempts || 1) > 1;
+      
+      for (let i = 0; i < finalPlan.days.length; i++) {
+        let day = finalPlan.days[i];
+        
+        await pipeline.processDay(day, courseInfo, config.promptVersion, getEnrichmentPrompt, ENRICHMENT_SCHEMA as any, jobId, {
+            updateStep: async (jid: string, step: string, status: string) => await logJob(jid, `Step ${step}: ${status}`)
+        }, false, isRetry);
       }
 
-      // AGENT 3: GENERATOR (Gemini Pro) - Deep academic content (DAY-LEVEL GENERATION)
-      let enrichedPlan = intermediate.enrichedPlan || structuralPlan;
-      
-      if (!intermediate.enrichedPlan) {
-        await jobService.updateProgress(jobId, { progress: 65 });
-        const courseInfo = `${structuralPlan.course}, Quarter ${structuralPlan.quarter}, Week ${structuralPlan.weekId}`;
-        
-        /**
-         * MASTER PIPELINE CONTROLLER: processWeek
-         * Orchestrates Cache, AI, Validation, and Rules Enforcement.
-         */
-        const processWeek = async (plan: any) => {
-          const results = [];
-          
-          for (let i = 0; i < plan.days.length; i++) {
-            const day = plan.days[i];
-            const isTargeted = targetDays && targetDays.length > 0 ? targetDays.includes(day.day) : true;
-            
-            if (!isTargeted) {
-              results.push(rulesEngine.applyDayRules(day));
-              continue;
-            }
+      await updateJob(jobId, {
+        status: "completed",
+        progress: 100
+      });
 
-            try {
-              // 1. Prepare Enrichment Target
-              const lessonsToEnrich = day.lessons.filter((l: any) => {
-                const isForced = targetDays && targetDays.includes(day.day);
-                const isMissingContent = !(l.description && l.description.length > 20);
-                return isForced || isMissingContent;
-              }).map((l: any) => ({
-                id: l.id || generateHash(`${day.day}_${l.subject}_${l.lessonTitle}`),
-                subject: l.subject,
-                lessonTitle: l.lessonTitle,
-                currentDescription: l.description || ""
-              }));
-
-              if (lessonsToEnrich.length === 0) {
-                results.push(rulesEngine.applyDayRules(day));
-                continue;
-              }
-
-              const dayInputHash = generateHash(JSON.stringify({
-                course: plan.course,
-                quarter: plan.quarter,
-                day: day.day,
-                lessons: lessonsToEnrich
-              }));
-
-              // 2. CACHE CHECK
-              const isForced = force || (targetDays && targetDays.includes(day.day));
-              const cachedDay = await db.collection("generatedDays").doc(dayInputHash).get();
-              let processedDay;
-
-              if (cachedDay.exists() && !isForced) {
-                console.log(`[PIPELINE] Cache Hit: ${day.day}`);
-                processedDay = { ...day, lessons: cachedDay.data()?.lessons || day.lessons };
-              } else {
-                console.log(`[PIPELINE] Generation Start: ${day.day} (Forced: ${isForced})`);
-                // 3. GENERATION
-                const generatorModel = genAI.getGenerativeModel({ 
-                  model: "gemini-1.5-flash", 
-                  generationConfig: { responseMimeType: "application/json", responseSchema: ENRICHMENT_SCHEMA as any }
-                });
-
-                const generatorResult = await generatorModel.generateContent(getEnrichmentPrompt(day.day, JSON.stringify(lessonsToEnrich), courseInfo));
-                const usage = generatorResult.response.usageMetadata;
-                const enrichedResp = JSON.parse(generatorResult.response.text());
-                const enrichedItems = enrichedResp.enrichedItems || [];
-                
-                const synthesizedLessons = day.lessons.map((lesson: any) => {
-                  const item = enrichedItems.find((ei: any) => ei.id === lesson.id || ei.lessonTitle === lesson.lessonTitle);
-                  return item ? { ...lesson, ...item } : lesson;
-                });
-
-                processedDay = { ...day, lessons: synthesizedLessons };
-
-                // 4. OBSERVABILITY
-                await db.collection("logs").add({
-                  jobId,
-                  userId: job.userId,
-                  step: "generateDay",
-                  promptVersion: PROMPT_VERSION,
-                  day: day.day,
-                  input: { lessonsToEnrich, courseInfo },
-                  output: { enrichedItems, usage },
-                  timestamp: admin.firestore.FieldValue.serverTimestamp()
-                });
-              }
-
-              // 5. ENFORCE SYSTEM RULES
-              processedDay = rulesEngine.applyDayRules(processedDay);
-
-              // 6. VALIDATION
-              if (!rulesEngine.validateDay(processedDay)) {
-                throw new Error("Validation Failure: Structural integrity compromised during synthesis.");
-              }
-
-              // 7. STORE (If generated)
-              if (!cachedDay.exists()) {
-                await db.collection("generatedDays").doc(dayInputHash).set({
-                  lessons: processedDay.lessons,
-                  promptVersion: PROMPT_VERSION,
-                  createdAt: admin.firestore.FieldValue.serverTimestamp()
-                });
-              }
-
-              results.push(processedDay);
-              
-              // Progress tracking (Update every day in the loop)
-              const dayProgress = 65 + Math.floor(((i + 1) / plan.days.length) * 20);
-              await jobService.updateProgress(jobId, { progress: dayProgress });
-
-            } catch (err: any) {
-              console.error(`[PIPELINE FAILURE] ${day.day}`, err);
-              results.push({ 
-                ...day, 
-                error: true, 
-                message: `Pipeline Fault: ${err.message}` 
-              });
-            }
-          }
-          return results;
-        };
-
-        const enrichedDays = await processWeek(structuralPlan);
-        enrichedPlan = { ...structuralPlan, days: enrichedDays };
-        
-        // Final Weekly Level Pass
-        enrichedPlan = rulesEngine.applyHardRules(enrichedPlan);
-
-        await jobService.addLog(jobId, {
-          step: 'RULE_ENFORCER',
-          input: { planDayCount: enrichedPlan.days.length },
-          output: { status: 'rulesApplied' }
-        });
-
-        await jobService.updateProgress(jobId, { 
-          progress: 85, 
-          intermediateState: { ...intermediate, enrichedPlan } 
-        });
-      }
-
-      // AGENT 4: VALIDATOR (JS Logic) - Rule enforcement
-      await jobService.updateProgress(jobId, { progress: 90 });
-      let finalPlan = rulesEngine.validateAgenda(enrichedPlan);
-      const validation = rulesEngine.validateThalesRules(finalPlan);
-      
-      finalPlan.days = finalPlan.days.map((day: any) => ({
-        ...day,
-        lessons: (day.lessons || []).map((lesson: any) => ({
-          ...lesson,
-          lessonTitle: (lesson.lessonTitle || "TBD").replace(/Saxon|Shurley|SOTW/gi, 'Standard').trim(),
-          lesson: lesson.lesson?.replace(/Saxon|Shurley|SOTW/gi, 'Standard').trim(), 
-          objectives: (lesson.objectives || []).map((obj: string) => obj.replace(/Saxon|Shurley|SOTW/gi, 'Standard'))
-        }))
-      }));
-
-      return finalPlan;
-    });
+    } catch (e: any) {
+      console.error(e);
+      await updateJob(jobId, { status: "failed" });
+      await logJob(jobId, "FAILED: " + e.message);
+    }
   })();
 
   return { jobId };
@@ -364,6 +131,7 @@ export const getJobStatus = onCall(async (request: CallableRequest<any>) => {
     id: jobData?.id,
     status: jobData?.status,
     progress: jobData?.progress,
+    steps: jobData?.steps || {},
     result: jobData?.result,
     error: jobData?.error,
     updatedAt: jobData?.updatedAt?.toDate().toISOString()
@@ -373,39 +141,29 @@ export const getJobStatus = onCall(async (request: CallableRequest<any>) => {
 export const startAnnouncementGeneration = onCall(async (request: CallableRequest<any>) => {
   if (!request.auth) throw new HttpsError("unauthenticated", "Auth required.");
   
-  const { weekId, settings, command, plannerRows } = request.data;
-  const userId = request.auth.uid;
-  const inputHash = generateHash(`ANN_${userId}_${weekId}_${command}_${JSON.stringify(plannerRows)}`);
+  const input = request.data;
+  const config = await getSystemConfigService();
+  const configSnapshot = {
+    model: config.model,
+    promptVersion: config.promptVersion,
+    rules: config.rules
+  };
+  const jobId = await createJob(input, configSnapshot);
 
-  // Check cache
-  const existingJobSnap = await db.collection('jobs').doc(inputHash).get();
-  if (existingJobSnap.exists()) {
-    const jobData = existingJobSnap.data();
-    if (jobData?.status === JobStatus.COMPLETED) {
-      return { jobId: inputHash, status: JobStatus.COMPLETED, result: jobData.result };
-    }
-  }
-
-  const jobId = await jobService.getOrCreateJob(userId, 'AI_ANNOUNCEMENT', request.data, { customId: inputHash });
-
-  // Background processing
   (async () => {
-    await jobService.runProcessor(jobId, async (job) => {
-      const { command, plannerRows, settings } = job.payload;
+    try {
+      await updateJob(jobId, { status: "running" });
+
+      const { command, plannerRows, settings, weekId } = input;
       
-      await jobService.updateProgress(jobId, { progress: 20 });
-      
-      // Deterministic Preparation
+      await logJob(jobId, "Starting announcement generation...");
+
       const mathTestNum = command.match(/math\s*test\s*(\d+)/i)?.[1];
       let curriculumContext = "";
       if (mathTestNum) {
          curriculumContext += `\nMath Test ${mathTestNum} detected.`;
       }
-      
-      await jobService.updateProgress(jobId, { progress: 40 });
 
-      // AI Generation
-      const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
       const prompt = `
         TASK: Draft a parent announcement for Thales Academy.
         USER COMMAND: ${command}
@@ -420,48 +178,24 @@ export const startAnnouncementGeneration = onCall(async (request: CallableReques
         - Friday Rule: If today is Friday, keep it brief and celebratory.
       `;
 
-      try {
-        const result = await model.generateContent(prompt);
-        const usage = result.response.usageMetadata;
-        const text = result.response.text();
+      // Use the new generator
+      const text = await generateWithControl(prompt, "generate", config, genAI, request.auth.uid);
 
-        await jobService.addLog(jobId, {
-          step: 'AI_ANNOUNCEMENT_CONTENT',
-          message: 'Neural Engine: Crafted announcement content.',
-          input: { command, tone: settings?.tone },
-          output: { textLength: text.length, usage }
-        });
-
-        // Global Observability Log
-        await db.collection("logs").add({
-          jobId,
-          userId: job.userId,
-          step: "generateAnnouncement",
-          promptVersion: PROMPT_VERSION,
-          input: { command, plannerRowsCount: plannerRows.length },
-          output: { text, usage },
-          timestamp: admin.firestore.FieldValue.serverTimestamp()
-        });
-
-        await jobService.updateProgress(jobId, { progress: 90 });
-        
-        return {
+      await updateJob(jobId, {
+        status: "completed",
+        progress: 100,
+        result: {
           title: `${settings?.course || 'Thales Academy'} Update - ${weekId}`,
           bodyHTML: text,
           suggestedPostDate: new Date().toISOString()
-        };
-      } catch (err: any) {
-        console.error("[ANN AI FAILURE]", err);
-        await jobService.addLog(jobId, {
-          step: 'AI_ERROR',
-          message: `Intelligence Fault: ${err.message}`,
-          error: err.stack
-        });
-        throw err;
-      }
-    });
+        }
+      });
+    } catch (e: any) {
+      await updateJob(jobId, { status: "failed" });
+      await logJob(jobId, "FAILED: " + e.message);
+    }
   })();
-
+  
   return { jobId };
 });
 
@@ -500,6 +234,10 @@ export const deployPages = onCall({ secrets: [canvasApiToken] }, async (request:
       
       const currentHash = generateHash(page.html + page.title);
       let canvasId = page.canvasId || shadowCopy?.canvasId;
+      
+      if (!canvasId) {
+        canvasId = await diffEngine.findResourceIdByTitle(page.courseId, page.title, 'pages', token);
+      }
 
       // 3. DIFF SYNC LAYER
       if (canvasId && shadowCopy?.contentHash === currentHash && !force) {
@@ -583,6 +321,10 @@ export const deployAssignments = onCall({ secrets: [canvasApiToken] }, async (re
       
       const currentHash = generateHash(payloadToHash);
       let canvasId = assign.canvasId || shadowCopy?.canvasId;
+      
+      if (!canvasId) {
+        canvasId = await diffEngine.findResourceIdByTitle(assign.courseId, assign.title, 'assignments', token);
+      }
 
       // DIFF SYNC LAYER
       if (canvasId && shadowCopy?.contentHash === currentHash && !force) {
@@ -630,6 +372,45 @@ export const deployAssignments = onCall({ secrets: [canvasApiToken] }, async (re
   return { success: true, count: results.length };
 });
 
+/**
+ * Audits curriculum data against Thales Academy rules.
+ */
+export const auditCurriculum = onCall(async (request: CallableRequest<any>) => {
+  if (!request.auth) throw new HttpsError("unauthenticated", "Auth required.");
+  const { items } = request.data;
+  
+  if (!Array.isArray(items)) {
+    throw new HttpsError("invalid-argument", "Missing required field: items (array).");
+  }
+
+  const results = items.map(item => {
+    const { type, identifier, content, weekNumber } = item;
+    const audit = rulesEngine.verifyCurriculum(type, identifier, content);
+    return { weekNumber, audit };
+  });
+
+  return { success: true, results };
+});
+
+/**
+ * Suggests assignments based on planner data using the master rules engine.
+ */
+export const suggestAssignments = onCall(async (request: CallableRequest<any>) => {
+  if (!request.auth) throw new HttpsError("unauthenticated", "Auth required.");
+  const { plannerRows } = request.data;
+  
+  if (!Array.isArray(plannerRows)) {
+    throw new HttpsError("invalid-argument", "plannerRows must be an array.");
+  }
+
+  const suggestions = plannerRows.map(row => ({
+    rowId: row.id,
+    assignments: rulesEngine.generateAssignments(row)
+  }));
+
+  return { success: true, suggestions };
+});
+
 export const deployAnnouncements = onCall({ secrets: [canvasApiToken] }, async (request: CallableRequest<any>) => {
   if (!request.auth) throw new HttpsError("unauthenticated", "Auth required.");
   const token = canvasApiToken.value();
@@ -662,6 +443,10 @@ export const deployAnnouncements = onCall({ secrets: [canvasApiToken] }, async (
 
       const currentHash = generateHash(ann.content + ann.title);
       let canvasId = ann.canvasId || shadowCopy?.canvasId;
+      
+      if (!canvasId) {
+        canvasId = await diffEngine.findResourceIdByTitle(ann.courseId, ann.title, 'discussion_topics', token);
+      }
 
       // DIFF SYNC LAYER
       if (canvasId && shadowCopy?.contentHash === currentHash && !force) {
@@ -1024,6 +809,75 @@ export const sweepDuplicates = neverCrash(async (request: CallableRequest<any>) 
 });
 
 /**
+ * Executes a full sync of the local planner to Canvas.
+ * Generates diff server-side and applies changes.
+ */
+export const executeSync = onCall({ secrets: [canvasApiToken] }, async (request: CallableRequest<any>) => {
+  if (!request.auth) throw new HttpsError("unauthenticated", "Auth required.");
+  const { localData, courseId } = request.data;
+  const token = canvasApiToken.value();
+
+  if (!Array.isArray(localData) || !courseId) {
+    throw new HttpsError("invalid-argument", "localData (array) and courseId are required.");
+  }
+
+  // 1. Generate Diff on Server
+  const diff = await diffEngine.generateDiff(localData, courseId, token);
+
+  const results = {
+    added: 0,
+    updated: 0,
+    deleted: 0,
+    errors: [] as string[]
+  };
+
+  // 2. Execute Additions
+  for (const week of diff.additions) {
+    try {
+      const topic = (week as any).topic || week.readingWeek || ("Unit " + week.weekNumber);
+      await canvasRequest(`courses/${courseId}/modules`, 'POST', {
+        module: { name: `Week ${week.weekNumber}: ${topic}` }
+      }, token);
+      results.added++;
+    } catch (err: any) {
+      results.errors.push(`Failed to add week ${week.weekNumber}: ${err.message}`);
+    }
+  }
+
+  // 3. Execute Deletions (Unpublish/Archive)
+  for (const module of diff.deletions) {
+    try {
+      // For simplicity, we just unpublish the module
+      await canvasRequest(`courses/${courseId}/modules/${module.id}`, 'PUT', {
+        module: { published: false }
+      }, token);
+      results.deleted++;
+    } catch (err: any) {
+      results.errors.push(`Failed to archive module ${module.id}: ${err.message}`);
+    }
+  }
+
+  return { success: true, results };
+});
+
+/**
+ * Generates a sync diff without applying it. 
+ * Used for pre-flight checks in the UI.
+ */
+export const generateSyncDiff = onCall({ secrets: [canvasApiToken] }, async (request: CallableRequest<any>) => {
+  if (!request.auth) throw new HttpsError("unauthenticated", "Auth required.");
+  const { localData, courseId } = request.data;
+  const token = canvasApiToken.value();
+
+  if (!Array.isArray(localData) || !courseId) {
+    throw new HttpsError("invalid-argument", "localData and courseId are required.");
+  }
+
+  const diff = await diffEngine.generateDiff(localData, courseId, token);
+  return diff;
+});
+
+/**
  * AI File Classification: Categorizes Canvas files using historical rules and Gemini
  */
 export const classifyCanvasFiles = neverCrash(async (request: CallableRequest<any>) => {
@@ -1088,3 +942,30 @@ export const classifyCanvasFiles = neverCrash(async (request: CallableRequest<an
         throw new Error("AI Classification failed to generate valid data.");
     }
 });
+
+// --- CONTROL PLANE FUNCTIONS ---
+
+export const getSystemConfig = onCall(async (request: CallableRequest<any>) => {
+  if (!request.auth) throw new HttpsError("unauthenticated", "Auth required.");
+  return await getSystemConfigService();
+});
+
+export const updateSystemConfig = onCall(async (request: CallableRequest<any>) => {
+  if (!request.auth) throw new HttpsError("unauthenticated", "Auth required.");
+  return await updateSystemConfigService(request.data);
+});
+
+export const retryJob = onCall(async (request: CallableRequest<any>) => {
+  if (!request.auth) throw new HttpsError("unauthenticated", "Auth required.");
+  const { jobId } = request.data;
+  if (!jobId) throw new HttpsError("invalid-argument", "jobId is required.");
+
+  await updateJob(jobId, {
+    status: "pending",
+    retries: admin.firestore.FieldValue.increment(1)
+  });
+
+  return { success: true };
+});
+
+export const trackMetrics = trackMetricsService;

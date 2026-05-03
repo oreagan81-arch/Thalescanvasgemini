@@ -2,6 +2,7 @@ import { create, StateCreator } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import { calendarService } from './services/service.calendar';
 import { PacingWeek } from './services/service.pacingImport';
+import { SystemConfig } from './types';
 
 interface UISlice {
   sidebarOpen: boolean;
@@ -61,7 +62,9 @@ interface MetaSlice {
 
 interface BrainSlice {
   activeJobId: string | null;
+  config: SystemConfig;
   setActiveJob: (jobId: string | null) => void;
+  updateConfig: (config: Partial<SystemConfig>) => void;
 }
 
 export type ThalesState = UISlice & AcademicSlice & DataSlice & CommandSlice & SettingsSlice & MetaSlice & BrainSlice;
@@ -70,7 +73,25 @@ const initialContext = calendarService.getAcademicContext();
 
 const createBrainSlice: StateCreator<ThalesState, [], [], BrainSlice> = (set) => ({
   activeJobId: null,
+  config: {
+    model: "gemini-1.5-pro",
+    fallbackModel: "gemini-1.5-flash",
+    promptVersion: "v3",
+    temperature: 0.2,
+    maxTokens: 2048,
+    rules: {
+      enforceFridayMessage: true,
+      requireResources: true,
+      strictHomeworkLogic: true,
+    },
+    features: {
+      enableCaching: true,
+      enableDiffSync: true,
+      enableAI: true,
+    },
+  },
   setActiveJob: (jobId) => set({ activeJobId: jobId }),
+  updateConfig: (newConfig) => set((state) => ({ config: { ...state.config, ...newConfig } })),
 });
 
 const createUISlice: StateCreator<ThalesState, [], [], UISlice> = (set) => ({
@@ -216,6 +237,7 @@ export const useStore = create<ThalesState>()(
         pacingGuideUrl: state.pacingGuideUrl,
         plannerData: state.plannerData,
         pendingNewsletterDraft: state.pendingNewsletterDraft,
+        config: state.config,
       }),
     }
   )

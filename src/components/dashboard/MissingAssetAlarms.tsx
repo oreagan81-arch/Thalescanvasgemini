@@ -19,7 +19,7 @@ export function MissingAssetAlarms({ courseId, weekId }: { courseId: string, wee
       setLoading(true);
       try {
         const files = await canvasApiService.getCourseFiles(courseId);
-        const fileNames = files.map((f: any) => f.display_name.toLowerCase());
+        const fileNames = (Array.isArray(files) ? files : []).map((f: any) => f.display_name.toLowerCase());
         
         // Mock targets for the demo week
         const targets = ['chapter_3_quiz', 'spelling_list_w1', 'math_lesson_4'];

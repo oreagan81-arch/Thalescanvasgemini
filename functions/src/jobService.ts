@@ -28,6 +28,7 @@ export interface Job<T = any, R = any> {
   maxAttempts: number;
   error?: string;
   logs: JobLog[];
+  steps: Record<string, 'pending' | 'running' | 'done' | 'failed'>;
   intermediateState?: any;
   createdAt: admin.firestore.Timestamp | any;
   updatedAt: admin.firestore.Timestamp | any;
@@ -93,6 +94,7 @@ export const jobService = {
       attempts: 1,
       maxAttempts,
       logs: [],
+      steps: {},
       createdAt: admin.firestore.FieldValue.serverTimestamp(),
       updatedAt: admin.firestore.FieldValue.serverTimestamp(),
     };
@@ -100,6 +102,16 @@ export const jobService = {
     await jobRef.set(newJob);
     console.log(`[JobQueue] Created new job: ${jobId} of type ${type}`);
     return jobId;
+  },
+
+  /**
+   * Updates a specific step status.
+   */
+  async updateStep(jobId: string, step: string, status: 'pending' | 'running' | 'done' | 'failed') {
+    await db.collection('jobs').doc(jobId).update({
+      [`steps.${step}`]: status,
+      updatedAt: admin.firestore.FieldValue.serverTimestamp()
+    });
   },
 
   /**

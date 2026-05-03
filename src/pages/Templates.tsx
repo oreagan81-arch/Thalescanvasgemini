@@ -92,7 +92,8 @@ export function Templates() {
           </div>
         ) : (
           filteredTemplates.map((template) => {
-            const parsed = commandParser.parse(template.command);
+            const intent = commandParser.parse(template.command);
+            const parsed = commandParser.getLegacyMetadata(intent);
             return (
               <Card key={template.id} className="group rounded-2xl border border-white/10 bg-[#121216] hover:border-amber-500/30 transition-all overflow-hidden flex flex-col">
                 <div className="p-1 bg-white/5 border-b border-white/5 flex items-center justify-between px-4 h-10">
