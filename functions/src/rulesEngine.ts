@@ -18,6 +18,10 @@ export interface DayPlan {
     homework?: string;
     resources?: string[];
   }[];
+  homework?: string; // Total homework summary
+  resources?: string[]; // Day-specific resources
+  error?: boolean;
+  message?: string;
 }
 
 export interface WeeklyPlan {
@@ -283,23 +287,32 @@ export const rulesEngine = {
   /**
    * Proactively applies deterministic Thales Academy rules.
    * This is NOT AI; it is deterministic business logic.
+   * COMPONENT: Agent 4 (ENFORCER)
    */
   applyHardRules: (plan: WeeklyPlan): WeeklyPlan => {
-    // Initialize global sections if missing
+    // 1. Weekly Level Defaults
     if (!plan.reminders) plan.reminders = [];
-    if (!plan.resources) plan.resources = [
-      "4th Grade Reading Workbook",
-      "4th Grade Reading Textbook",
-      "4th Grade Master Spelling List"
-    ];
+    if (!plan.resources || plan.resources.length === 0) {
+      plan.resources = [
+        "4th Grade Reading Workbook",
+        "4th Grade Reading Textbook",
+        "4th Grade Master Spelling List"
+      ];
+    }
 
-    plan.days.forEach(day => {
-      // 1. Remove Learning Objectives/Essential Questions (Rule 3)
-      day.lessons.forEach(lesson => {
-        lesson.objectives = [];
-      });
+    plan.days = plan.days.map(day => {
+      // 2. Day Level Defaults (The "System Rules Layer")
+      if (!day.resources) day.resources = [];
+      if (!day.homework) day.homework = "";
 
-      // 2. Reading/Spelling Combined Mandate
+      // Friday Weekend Message
+      if (day.day === 'Friday' && !day.homework.includes('wonderful weekend')) {
+        day.homework = (day.homework + "\nHave a wonderful weekend!").trim();
+      }
+
+      // 3. Subject-Specific Hard Rules
+      
+      // Reading/Spelling Combined Mandate
       const readingIdx = day.lessons.findIndex(l => l.subject.toLowerCase().includes('reading'));
       const spellingIdx = day.lessons.findIndex(l => l.subject.toLowerCase().includes('spelling'));
       
@@ -319,45 +332,118 @@ export const rulesEngine = {
         day.lessons.splice(spellingIdx, 1);
       }
 
-      // 3. Friday - Assessment Focus (Rule 3/Special)
+      // Friday - Assessment Focus
       if (day.day === 'Friday') {
         const subjects = day.lessons.map(l => l.subject.toLowerCase());
         if (subjects.some(s => s.includes('reading')) && !day.lessons.some(l => l.lessonTitle.toLowerCase().includes('fluency'))) {
           day.lessons.push({
             subject: 'Assessments',
             lessonTitle: 'Mastery Test & Fluency Check',
-            description: '',
+            description: 'Mastery assessment and reading fluency check.',
             homework: 'No Homework'
           });
         }
       }
 
+      // 4. Individual Lesson Polishing
       day.lessons.forEach(lesson => {
-        const originalTitle = lesson.lessonTitle;
-        const subject = lesson.subject;
+        // Enforce Brevity Mandate (Rule 2)
+        lesson.lessonTitle = rulesEngine.thalesify(lesson.lessonTitle, lesson.subject);
+        
+        // Remove Objectives (Rule 3)
+        lesson.objectives = [];
 
-        // 4. Thalesify Titles (Brevity Mandate)
-        if (!subject.includes('/')) { // Only thalesify if not already combined
-          lesson.lessonTitle = rulesEngine.thalesify(originalTitle, subject);
-        }
-
-        // 5. Simplify "In Class" (Description)
+        // Simplify Descriptions
         if (lesson.description && lesson.description.length > 5) {
+          // If the AI output a long block, we enforce the title-as-description rule for student clarity
           lesson.description = lesson.lessonTitle;
         }
 
-        // 6. Simplify "At Home" (Homework)
-        if (lesson.homework) {
-           if (subject.toLowerCase().includes('math')) {
-             const match = originalTitle.match(/Lesson\s+(\d+)/i);
-             if (match) lesson.homework = `Lesson ${match[1]} Evens`;
-           }
-        } else {
-           lesson.homework = undefined;
+        // Standardize Math Homework
+        if (lesson.subject.toLowerCase().includes('math') && lesson.homework) {
+          const match = lesson.lessonTitle.match(/Lesson\s+(\d+)/i);
+          if (match) lesson.homework = `Lesson ${match[1]} Evens`;
         }
       });
+
+      return day;
     });
 
     return plan;
+  },
+
+  /**
+   * Applies Thales Academy rules to a single day.
+   */
+  applyDayRules: (day: DayPlan): DayPlan => {
+    // 1. Day Level Defaults
+    if (!day.resources) day.resources = [];
+    if (!day.homework) day.homework = "";
+
+    // Friday Weekend Message
+    if (day.day === 'Friday' && !day.homework.includes('wonderful weekend')) {
+      day.homework = (day.homework + "\nHave a wonderful weekend!").trim();
+    }
+
+    // 2. Reading/Spelling Combined Mandate
+    const readingIdx = day.lessons.findIndex(l => l.subject.toLowerCase().includes('reading'));
+    const spellingIdx = day.lessons.findIndex(l => l.subject.toLowerCase().includes('spelling'));
+    
+    if (readingIdx !== -1 && spellingIdx !== -1) {
+      const reading = day.lessons[readingIdx];
+      const spelling = day.lessons[spellingIdx];
+      
+      reading.subject = "Reading/Spelling";
+      reading.lessonTitle = `${rulesEngine.thalesify(reading.lessonTitle, 'Reading')}, ${rulesEngine.thalesify(spelling.lessonTitle, 'Spelling')}`;
+      reading.description = reading.lessonTitle;
+      
+      if (reading.homework || spelling.homework) {
+        reading.homework = `At Home: ${reading.homework || 'Review'}, ${spelling.homework || 'Review'}`;
+      }
+      
+      day.lessons.splice(spellingIdx, 1);
+    }
+
+    // 3. Friday - Assessment Focus
+    if (day.day === 'Friday') {
+      const subjects = day.lessons.map(l => l.subject.toLowerCase());
+      if (subjects.some(s => s.includes('reading')) && !day.lessons.some(l => l.lessonTitle.toLowerCase().includes('fluency'))) {
+        day.lessons.push({
+          subject: 'Assessments',
+          lessonTitle: 'Mastery Test & Fluency Check',
+          description: 'Mastery assessment and reading fluency check.',
+          homework: 'No Homework'
+        });
+      }
+    }
+
+    // 4. Individual Lesson Polishing
+    day.lessons.forEach(lesson => {
+      lesson.lessonTitle = rulesEngine.thalesify(lesson.lessonTitle, lesson.subject);
+      lesson.objectives = [];
+      if (lesson.description && lesson.description.length > 5) {
+        lesson.description = lesson.lessonTitle;
+      }
+      if (lesson.subject.toLowerCase().includes('math') && lesson.homework) {
+        const match = lesson.lessonTitle.match(/Lesson\s+(\d+)/i);
+        if (match) lesson.homework = `Lesson ${match[1]} Evens`;
+      }
+    });
+
+    return day;
+  },
+
+  /**
+   * Validates if a day plan meets the minimum structural requirements.
+   */
+  validateDay: (day: any): boolean => {
+    if (!day || typeof day !== 'object') return false;
+    if (!day.day || !day.lessons || !Array.isArray(day.lessons)) return false;
+    
+    // Check for critical missing logic/content
+    const hasEmptyLessons = day.lessons.some((l: any) => !l.subject || !l.lessonTitle);
+    if (hasEmptyLessons) return false;
+
+    return true;
   }
 };

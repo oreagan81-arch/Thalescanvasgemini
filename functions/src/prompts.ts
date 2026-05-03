@@ -7,11 +7,11 @@
  */
 
 export const PROMPT_VERSIONS = {
-  PLANNER_EXTRACTION: "2.1.0",
-  CORE: "2.1.0"
+  PLANNER_EXTRACTION: "3.0.0",
+  CORE: "3.0.0"
 };
 
-export const PROMPT_VERSION = "v2.1";
+export const PROMPT_VERSION = "v3";
 
 export const PLAN_ITEM_SCHEMA = {
   type: "object",

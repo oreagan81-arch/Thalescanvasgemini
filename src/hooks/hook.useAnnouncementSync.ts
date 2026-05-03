@@ -1,11 +1,13 @@
 import { useState, useEffect, useMemo } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { announcementService, Announcement } from '../services/service.announcement';
-import { draftAnnouncement } from '../lib/geminiHelper';
 import { plannerService } from '../services/service.planner';
 import { UserSettings } from '../services/service.settings';
 import { useAuth } from '../contexts/AuthContext';
 import { toast } from 'sonner';
+import { httpsCallable } from 'firebase/functions';
+import { functions } from '../lib/firebase';
+import { useStore } from '../store';
 
 // Simple global cache for announcements to prevent re-fetching/flicker during navigation
 const announcementCache: Record<string, Announcement[]> = {};
@@ -61,6 +63,7 @@ export function useAnnouncements(weekId: string) {
 export function useDraftAnnouncement() {
   const { user } = useAuth();
   const [isDrafting, setIsDrafting] = useState(false);
+  const setActiveJob = useStore((state) => state.setActiveJob);
 
   const draft = async (weekId: string, settings: UserSettings, command?: string) => {
     if (!user) return null;
@@ -75,11 +78,21 @@ export function useDraftAnnouncement() {
         });
       });
 
-      const result = await draftAnnouncement({ label: weekId }, plannerRows, settings, command);
-      return result;
+      const startAnnouncementGeneration = httpsCallable(functions, 'startAnnouncementGeneration');
+      const response = await startAnnouncementGeneration({ 
+        weekId, 
+        settings, 
+        command, 
+        plannerRows 
+      });
+      
+      const { jobId } = response.data as { jobId: string };
+      setActiveJob(jobId);
+      toast.info("Neural Engine Dispatch: Syncing academic clusters...");
+      return jobId;
     } catch (error) {
       console.error("AI Briefing Error:", error);
-      toast.error("Intelligence Failure: Failed to generate announcement briefing. Please verify your cloud connection.");
+      toast.error("Intelligence Failure: Failed to start generation job.");
       return null;
     } finally {
       setIsDrafting(false);

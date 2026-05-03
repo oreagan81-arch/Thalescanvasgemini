@@ -109,7 +109,7 @@ function generateHash(input: string): string {
 export const startAiPlanGeneration = onCall(async (request: CallableRequest<any>) => {
   if (!request.auth) throw new HttpsError("unauthenticated", "Auth required.");
   
-  const { rawText, existingState, historicalContext, weekId, quarter, targetDays } = request.data;
+  const { rawText, existingState, historicalContext, weekId, quarter, targetDays, force } = request.data;
   if (!rawText) throw new HttpsError("invalid-argument", "Raw text is required.");
 
   const userId = request.auth.uid;
@@ -117,12 +117,14 @@ export const startAiPlanGeneration = onCall(async (request: CallableRequest<any>
   const inputHash = generateHash(`${userId}_${rawText}_${JSON.stringify(existingState || {})}_${JSON.stringify(historicalContext || {})}_${JSON.stringify(targetDays || [])}`);
   
   // 1. CACHE CHECK
-  const existingJobSnap = await db.collection('jobs').doc(inputHash).get();
-  if (existingJobSnap.exists()) {
-    const jobData = existingJobSnap.data();
-    if (jobData?.status === JobStatus.COMPLETED) {
-      console.log(`[CACHE HIT] Returning existing result for ${inputHash}`);
-      return { jobId: inputHash, status: JobStatus.COMPLETED, result: jobData.result };
+  if (!force) {
+    const existingJobSnap = await db.collection('jobs').doc(inputHash).get();
+    if (existingJobSnap.exists()) {
+      const jobData = existingJobSnap.data();
+      if (jobData?.status === JobStatus.COMPLETED) {
+        console.log(`[CACHE HIT] Returning existing result for ${inputHash}`);
+        return { jobId: inputHash, status: JobStatus.COMPLETED, result: jobData.result };
+      }
     }
   }
 
@@ -187,77 +189,129 @@ export const startAiPlanGeneration = onCall(async (request: CallableRequest<any>
       
       if (!intermediate.enrichedPlan) {
         await jobService.updateProgress(jobId, { progress: 65 });
-        const courseInfo = `${structuralPlan.course}, Quarter ${structuralPlan.quarter}, Week ${structuralPlan.week}`;
+        const courseInfo = `${structuralPlan.course}, Quarter ${structuralPlan.quarter}, Week ${structuralPlan.weekId}`;
         
-        for (let i = 0; i < structuralPlan.days.length; i++) {
-          const day = structuralPlan.days[i];
+        /**
+         * MASTER PIPELINE CONTROLLER: processWeek
+         * Orchestrates Cache, AI, Validation, and Rules Enforcement.
+         */
+        const processWeek = async (plan: any) => {
+          const results = [];
           
-          const isTargeted = targetDays && targetDays.length > 0 ? targetDays.includes(day.day) : true;
-          if (!isTargeted) continue;
-
-          const lessonsToEnrich = day.lessons.filter((l: any) => {
-            const isForced = targetDays && targetDays.includes(day.day);
-            const isMissingContent = !(l.description && l.description.length > 20 && l.objectives && l.objectives.length > 0);
-            return isForced || isMissingContent;
-          }).map((l: any) => {
-            if (!l.id) l.id = generateHash(`${day.day}_${l.subject}_${l.lessonTitle}`);
-            return {
-              id: l.id,
-              subject: l.subject,
-              lessonTitle: l.lessonTitle,
-              currentDescription: l.description || "",
-              currentObjectives: l.objectives || []
-            };
-          });
-
-          if (lessonsToEnrich.length > 0) {
-            const dayProgress = 65 + Math.floor((i / structuralPlan.days.length) * 20);
-            await jobService.updateProgress(jobId, { progress: dayProgress });
+          for (let i = 0; i < plan.days.length; i++) {
+            const day = plan.days[i];
+            const isTargeted = targetDays && targetDays.length > 0 ? targetDays.includes(day.day) : true;
             
-            const enrichmentHash = generateHash(JSON.stringify(lessonsToEnrich));
-            const cacheSnap = await db.collection("generatedAgendas").doc(enrichmentHash).get();
-            
-            let enrichedItems = [];
-            if (cacheSnap.exists()) {
-              enrichedItems = cacheSnap.data()?.enrichedItems || [];
-            } else {
-              const generatorModel = genAI.getGenerativeModel({ 
-                model: "gemini-1.5-flash", 
-                generationConfig: { responseMimeType: "application/json", responseSchema: ENRICHMENT_SCHEMA as any }
-              });
+            if (!isTargeted) {
+              results.push(rulesEngine.applyDayRules(day));
+              continue;
+            }
 
-              try {
+            try {
+              // 1. Prepare Enrichment Target
+              const lessonsToEnrich = day.lessons.filter((l: any) => {
+                const isForced = targetDays && targetDays.includes(day.day);
+                const isMissingContent = !(l.description && l.description.length > 20);
+                return isForced || isMissingContent;
+              }).map((l: any) => ({
+                id: l.id || generateHash(`${day.day}_${l.subject}_${l.lessonTitle}`),
+                subject: l.subject,
+                lessonTitle: l.lessonTitle,
+                currentDescription: l.description || ""
+              }));
+
+              if (lessonsToEnrich.length === 0) {
+                results.push(rulesEngine.applyDayRules(day));
+                continue;
+              }
+
+              const dayInputHash = generateHash(JSON.stringify({
+                course: plan.course,
+                quarter: plan.quarter,
+                day: day.day,
+                lessons: lessonsToEnrich
+              }));
+
+              // 2. CACHE CHECK
+              const isForced = force || (targetDays && targetDays.includes(day.day));
+              const cachedDay = await db.collection("generatedDays").doc(dayInputHash).get();
+              let processedDay;
+
+              if (cachedDay.exists() && !isForced) {
+                console.log(`[PIPELINE] Cache Hit: ${day.day}`);
+                processedDay = { ...day, lessons: cachedDay.data()?.lessons || day.lessons };
+              } else {
+                console.log(`[PIPELINE] Generation Start: ${day.day} (Forced: ${isForced})`);
+                // 3. GENERATION
+                const generatorModel = genAI.getGenerativeModel({ 
+                  model: "gemini-1.5-flash", 
+                  generationConfig: { responseMimeType: "application/json", responseSchema: ENRICHMENT_SCHEMA as any }
+                });
+
                 const generatorResult = await generatorModel.generateContent(getEnrichmentPrompt(day.day, JSON.stringify(lessonsToEnrich), courseInfo));
+                const usage = generatorResult.response.usageMetadata;
                 const enrichedResp = JSON.parse(generatorResult.response.text());
-                enrichedItems = enrichedResp.enrichedItems || [];
+                const enrichedItems = enrichedResp.enrichedItems || [];
                 
-                await db.collection("generatedAgendas").doc(enrichmentHash).set({
-                  enrichedItems,
+                const synthesizedLessons = day.lessons.map((lesson: any) => {
+                  const item = enrichedItems.find((ei: any) => ei.id === lesson.id || ei.lessonTitle === lesson.lessonTitle);
+                  return item ? { ...lesson, ...item } : lesson;
+                });
+
+                processedDay = { ...day, lessons: synthesizedLessons };
+
+                // 4. OBSERVABILITY
+                await db.collection("logs").add({
+                  jobId,
+                  userId: job.userId,
+                  step: "generateDay",
+                  promptVersion: PROMPT_VERSION,
+                  day: day.day,
+                  input: { lessonsToEnrich, courseInfo },
+                  output: { enrichedItems, usage },
+                  timestamp: admin.firestore.FieldValue.serverTimestamp()
+                });
+              }
+
+              // 5. ENFORCE SYSTEM RULES
+              processedDay = rulesEngine.applyDayRules(processedDay);
+
+              // 6. VALIDATION
+              if (!rulesEngine.validateDay(processedDay)) {
+                throw new Error("Validation Failure: Structural integrity compromised during synthesis.");
+              }
+
+              // 7. STORE (If generated)
+              if (!cachedDay.exists()) {
+                await db.collection("generatedDays").doc(dayInputHash).set({
+                  lessons: processedDay.lessons,
+                  promptVersion: PROMPT_VERSION,
                   createdAt: admin.firestore.FieldValue.serverTimestamp()
                 });
+              }
 
-                await jobService.addLog(jobId, {
-                  step: `AI_ENRICHMENT_${day.day.toUpperCase()}`,
-                  input: { lessonsCount: lessonsToEnrich.length },
-                  output: { enrichedItemsCount: enrichedItems.length }
-                });
-              } catch (err) {
-                console.error(`[DAY AI FAILURE] ${day.day}`, err);
-              }
+              results.push(processedDay);
+              
+              // Progress tracking (Update every day in the loop)
+              const dayProgress = 65 + Math.floor(((i + 1) / plan.days.length) * 20);
+              await jobService.updateProgress(jobId, { progress: dayProgress });
+
+            } catch (err: any) {
+              console.error(`[PIPELINE FAILURE] ${day.day}`, err);
+              results.push({ 
+                ...day, 
+                error: true, 
+                message: `Pipeline Fault: ${err.message}` 
+              });
             }
-            
-             enrichedItems.forEach((item: any) => {
-              const lesson = day.lessons.find((l: any) => l.id === item.id || l.lessonTitle === item.lessonTitle);
-              if (lesson) {
-                lesson.description = item.description || lesson.description;
-                lesson.objectives = item.objectives || lesson.objectives;
-                lesson.homework = item.homework || lesson.homework;
-              }
-            });
           }
-        }
+          return results;
+        };
+
+        const enrichedDays = await processWeek(structuralPlan);
+        enrichedPlan = { ...structuralPlan, days: enrichedDays };
         
-        enrichedPlan = structuralPlan;
+        // Final Weekly Level Pass
         enrichedPlan = rulesEngine.applyHardRules(enrichedPlan);
 
         await jobService.addLog(jobId, {
@@ -294,9 +348,126 @@ export const startAiPlanGeneration = onCall(async (request: CallableRequest<any>
   return { jobId };
 });
 
+export const getJobStatus = onCall(async (request: CallableRequest<any>) => {
+  if (!request.auth) throw new HttpsError("unauthenticated", "Auth required.");
+  
+  const { jobId } = request.data;
+  if (!jobId) throw new HttpsError("invalid-argument", "jobId is required.");
+
+  const jobSnap = await db.collection('jobs').doc(jobId).get();
+  if (!jobSnap.exists()) {
+    throw new HttpsError("not-found", `Job ${jobId} not found.`);
+  }
+
+  const jobData = jobSnap.data();
+  return {
+    id: jobData?.id,
+    status: jobData?.status,
+    progress: jobData?.progress,
+    result: jobData?.result,
+    error: jobData?.error,
+    updatedAt: jobData?.updatedAt?.toDate().toISOString()
+  };
+});
+
+export const startAnnouncementGeneration = onCall(async (request: CallableRequest<any>) => {
+  if (!request.auth) throw new HttpsError("unauthenticated", "Auth required.");
+  
+  const { weekId, settings, command, plannerRows } = request.data;
+  const userId = request.auth.uid;
+  const inputHash = generateHash(`ANN_${userId}_${weekId}_${command}_${JSON.stringify(plannerRows)}`);
+
+  // Check cache
+  const existingJobSnap = await db.collection('jobs').doc(inputHash).get();
+  if (existingJobSnap.exists()) {
+    const jobData = existingJobSnap.data();
+    if (jobData?.status === JobStatus.COMPLETED) {
+      return { jobId: inputHash, status: JobStatus.COMPLETED, result: jobData.result };
+    }
+  }
+
+  const jobId = await jobService.getOrCreateJob(userId, 'AI_ANNOUNCEMENT', request.data, { customId: inputHash });
+
+  // Background processing
+  (async () => {
+    await jobService.runProcessor(jobId, async (job) => {
+      const { command, plannerRows, settings } = job.payload;
+      
+      await jobService.updateProgress(jobId, { progress: 20 });
+      
+      // Deterministic Preparation
+      const mathTestNum = command.match(/math\s*test\s*(\d+)/i)?.[1];
+      let curriculumContext = "";
+      if (mathTestNum) {
+         curriculumContext += `\nMath Test ${mathTestNum} detected.`;
+      }
+      
+      await jobService.updateProgress(jobId, { progress: 40 });
+
+      // AI Generation
+      const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+      const prompt = `
+        TASK: Draft a parent announcement for Thales Academy.
+        USER COMMAND: ${command}
+        ACADEMIC CONTEXT: ${JSON.stringify(plannerRows)}
+        TONE PREFERENCE: ${settings?.tone || 'Warm'}
+        ${curriculumContext}
+        
+        RULES:
+        - Use Cidi Labs dp-box and dp-header tags.
+        - Friday Agenda Rule: Omit instructional sections on Fridays, focus on assessments.
+        - Brevity Mandate: Strip all vendor names (Saxon, Shurley, etc).
+        - Friday Rule: If today is Friday, keep it brief and celebratory.
+      `;
+
+      try {
+        const result = await model.generateContent(prompt);
+        const usage = result.response.usageMetadata;
+        const text = result.response.text();
+
+        await jobService.addLog(jobId, {
+          step: 'AI_ANNOUNCEMENT_CONTENT',
+          message: 'Neural Engine: Crafted announcement content.',
+          input: { command, tone: settings?.tone },
+          output: { textLength: text.length, usage }
+        });
+
+        // Global Observability Log
+        await db.collection("logs").add({
+          jobId,
+          userId: job.userId,
+          step: "generateAnnouncement",
+          promptVersion: PROMPT_VERSION,
+          input: { command, plannerRowsCount: plannerRows.length },
+          output: { text, usage },
+          timestamp: admin.firestore.FieldValue.serverTimestamp()
+        });
+
+        await jobService.updateProgress(jobId, { progress: 90 });
+        
+        return {
+          title: `${settings?.course || 'Thales Academy'} Update - ${weekId}`,
+          bodyHTML: text,
+          suggestedPostDate: new Date().toISOString()
+        };
+      } catch (err: any) {
+        console.error("[ANN AI FAILURE]", err);
+        await jobService.addLog(jobId, {
+          step: 'AI_ERROR',
+          message: `Intelligence Fault: ${err.message}`,
+          error: err.stack
+        });
+        throw err;
+      }
+    });
+  })();
+
+  return { jobId };
+});
+
 export const deployPages = onCall({ secrets: [canvasApiToken] }, async (request: CallableRequest<any>) => {
   if (!request.auth) throw new HttpsError("unauthenticated", "Auth required.");
-  const { pages } = request.data;
+  const { pages, force } = request.data;
   const token = canvasApiToken.value();
   
   if (!Array.isArray(pages)) {
@@ -307,7 +478,7 @@ export const deployPages = onCall({ secrets: [canvasApiToken] }, async (request:
   for (const page of pages) {
     if (!page.id || !page.courseId) continue;
 
-    // Implement per-page lock to prevent concurrent duplicates
+    // 1. Transactional Lock
     const lockKey = generateHash(`deploy_page_${page.id}`);
     const lockRef = db.collection('locks').doc(lockKey);
     
@@ -317,55 +488,57 @@ export const deployPages = onCall({ secrets: [canvasApiToken] }, async (request:
         if (snap.exists() && snap.data()!.expiresAt.toDate() > new Date()) {
           throw new Error(`Deployment lock active for ${page.title}`);
         }
-        transaction.set(lockRef, { expiresAt: admin.firestore.FieldValue.serverTimestamp() });
+        transaction.set(lockRef, { 
+          expiresAt: admin.firestore.Timestamp.fromMillis(Date.now() + 60000) 
+        });
       });
 
+      // 2. Fetch Shadow State
       const pageRef = db.collection('canvas_pages').doc(page.id);
       const pageSnap = await pageRef.get();
-      const existingData = pageSnap.exists() ? pageSnap.data() : null;
+      const shadowCopy = pageSnap.exists() ? pageSnap.data() : null;
       
-      const currentHash = generateHash(page.html);
-      let canvasId = existingData?.canvasId;
+      const currentHash = generateHash(page.html + page.title);
+      let canvasId = page.canvasId || shadowCopy?.canvasId;
 
-      if (canvasId && existingData?.contentHash === currentHash) {
-        console.log(`[DEPLOY SKIP] Page "${page.title}" unchanged.`);
+      // 3. DIFF SYNC LAYER
+      if (canvasId && shadowCopy?.contentHash === currentHash && !force) {
+        console.log(`[SYNC SKIP] Page "${page.title}" matches remote state.`);
         deployed.push(page.title);
         continue;
       }
 
+      // 4. Remote Action
       let result;
       if (canvasId) {
-        // UPDATE EXISTING PAGE
-        console.log(`[DEPLOY UPDATE] Updating Page "${page.title}" (Canvas ID: ${canvasId})`);
+        console.log(`[SYNC UPDATE] Pushing diff for "${page.title}" (${canvasId})`);
         result = await canvasRequest(`courses/${page.courseId}/pages/${canvasId}`, 'PUT', {
           wiki_page: { title: page.title, body: page.html }
         }, token);
       } else {
-        // CREATE NEW PAGE
-        console.log(`[DEPLOY CREATE] Creating Page "${page.title}"`);
+        console.log(`[SYNC CREATE] Initializing new page "${page.title}"`);
         result = await canvasRequest(`courses/${page.courseId}/pages`, 'POST', {
           wiki_page: { title: page.title, body: page.html, published: false }
         }, token);
-        canvasId = result.url.split('/').pop(); // Extract page URL component or use ID if returned differently
+        canvasId = result.url.split('/').pop();
       }
       
+      // 5. Update Shadow Copy
       await pageRef.set({
         id: page.id,
         courseId: page.courseId,
         title: page.title,
-        htmlContent: page.html,
         canvasId: canvasId || result.page_id || result.url?.split('/').pop(),
         contentHash: currentHash,
         status: 'Deployed',
-        updatedAt: admin.firestore.FieldValue.serverTimestamp()
+        lastSyncedAt: admin.firestore.FieldValue.serverTimestamp()
       }, { merge: true });
 
       deployed.push(page.title);
-
-      await lockRef.update({ expiresAt: new Date(Date.now() + 2 * 60 * 1000) });
+      await lockRef.delete();
 
     } catch (error: any) {
-      console.error(`Failed to deploy page: ${error.message}`);
+      console.error(`Diff-Sync Error (${page.title}): ${error.message}`);
     }
   }
   return { success: true, deployed: deployed.length, titles: deployed };
@@ -374,7 +547,7 @@ export const deployPages = onCall({ secrets: [canvasApiToken] }, async (request:
 export const deployAssignments = onCall({ secrets: [canvasApiToken] }, async (request: CallableRequest<any>) => {
   if (!request.auth) throw new HttpsError("unauthenticated", "Auth required.");
   const token = canvasApiToken.value();
-  const { assignments } = request.data;
+  const { assignments, force } = request.data;
 
   if (!Array.isArray(assignments)) {
     throw new HttpsError("invalid-argument", "The 'assignments' argument must be an array.");
@@ -391,32 +564,36 @@ export const deployAssignments = onCall({ secrets: [canvasApiToken] }, async (re
       await db.runTransaction(async (transaction) => {
         const snap = await transaction.get(lockRef);
         if (snap.exists() && snap.data()!.expiresAt.toDate() > new Date()) {
-          throw new Error(`Lock active for assignment ${assign.title}`);
+          throw new Error(`Lock active for ${assign.title}`);
         }
-        transaction.set(lockRef, { expiresAt: admin.firestore.FieldValue.serverTimestamp() });
+        transaction.set(lockRef, { 
+          expiresAt: admin.firestore.Timestamp.fromMillis(Date.now() + 60000) 
+        });
       });
 
       const assignRef = db.collection('assignments').doc(assign.id);
       const assignSnap = await assignRef.get();
-      const existingData = assignSnap.exists() ? assignSnap.data() : null;
+      const shadowCopy = assignSnap.exists() ? assignSnap.data() : null;
 
-      const contentToHash = JSON.stringify({ 
+      const payloadToHash = JSON.stringify({ 
         title: assign.title, 
         description: assign.description, 
         points: assign.points 
       });
-      const currentHash = generateHash(contentToHash);
-      let canvasId = assign.canvasId || existingData?.canvasId;
+      
+      const currentHash = generateHash(payloadToHash);
+      let canvasId = assign.canvasId || shadowCopy?.canvasId;
 
-      if (canvasId && existingData?.contentHash === currentHash) {
-        console.log(`[ASSIGN SKIP] Unchanged: ${assign.title}`);
+      // DIFF SYNC LAYER
+      if (canvasId && shadowCopy?.contentHash === currentHash && !force) {
+        console.log(`[SYNC SKIP] Assignment "${assign.title}" matches remote state.`);
         results.push(canvasId);
         continue;
       }
 
       let res;
       if (canvasId) {
-        console.log(`[ASSIGN UPDATE] Updating ${assign.title} (Canvas ID: ${canvasId})`);
+        console.log(`[SYNC UPDATE] Syncing Assignment "${assign.title}" (${canvasId})`);
         res = await canvasRequest(`courses/${assign.courseId}/assignments/${canvasId}`, 'PUT', {
           assignment: { 
             name: assign.title, 
@@ -425,7 +602,7 @@ export const deployAssignments = onCall({ secrets: [canvasApiToken] }, async (re
           }
         }, token);
       } else {
-        console.log(`[ASSIGN CREATE] Creating ${assign.title}`);
+        console.log(`[SYNC CREATE] Creating Assignment "${assign.title}"`);
         res = await canvasRequest(`courses/${assign.courseId}/assignments`, 'POST', {
           assignment: { 
             name: assign.title, 
@@ -437,17 +614,17 @@ export const deployAssignments = onCall({ secrets: [canvasApiToken] }, async (re
         canvasId = res.id.toString();
       }
       
-      await assignRef.update({
-        status: 'Deployed', 
+      await assignRef.set({
         canvasId,
         contentHash: currentHash,
-        updatedAt: admin.firestore.FieldValue.serverTimestamp()
-      });
+        status: 'Deployed', 
+        lastSyncedAt: admin.firestore.FieldValue.serverTimestamp()
+      }, { merge: true });
 
-      await lockRef.update({ expiresAt: new Date(Date.now() + 2 * 60 * 1000) });
+      await lockRef.delete();
       results.push(canvasId);
     } catch (error: any) {
-      console.error(`Assignment deploy fail: ${error.message}`);
+      console.error(`Assignment Sync Failure: ${error.message}`);
     }
   }
   return { success: true, count: results.length };
@@ -456,7 +633,7 @@ export const deployAssignments = onCall({ secrets: [canvasApiToken] }, async (re
 export const deployAnnouncements = onCall({ secrets: [canvasApiToken] }, async (request: CallableRequest<any>) => {
   if (!request.auth) throw new HttpsError("unauthenticated", "Auth required.");
   const token = canvasApiToken.value();
-  const { announcements } = request.data;
+  const { announcements, force } = request.data;
 
   if (!Array.isArray(announcements)) {
     throw new HttpsError("invalid-argument", "The 'announcements' argument must be an array.");
@@ -465,7 +642,6 @@ export const deployAnnouncements = onCall({ secrets: [canvasApiToken] }, async (
   for (const ann of announcements) {
     if (!ann.id || !ann.courseId) continue;
 
-    // Lock per announcement
     const lockKey = generateHash(`deploy_ann_${ann.id}`);
     const lockRef = db.collection('locks').doc(lockKey);
 
@@ -475,29 +651,32 @@ export const deployAnnouncements = onCall({ secrets: [canvasApiToken] }, async (
         if (snap.exists() && snap.data()!.expiresAt.toDate() > new Date()) {
           throw new Error("Lock active");
         }
-        transaction.set(lockRef, { expiresAt: admin.firestore.FieldValue.serverTimestamp() });
+        transaction.set(lockRef, { 
+          expiresAt: admin.firestore.Timestamp.fromMillis(Date.now() + 60000) 
+        });
       });
 
       const annRef = db.collection('announcements').doc(ann.id);
       const annSnap = await annRef.get();
-      const existingData = annSnap.exists() ? annSnap.data() : null;
+      const shadowCopy = annSnap.exists() ? annSnap.data() : null;
 
       const currentHash = generateHash(ann.content + ann.title);
-      let canvasId = ann.canvasId || existingData?.canvasId;
+      let canvasId = ann.canvasId || shadowCopy?.canvasId;
 
-      if (canvasId && existingData?.contentHash === currentHash) {
-        console.log(`[ANN SKIP] Unchanged: ${ann.title}`);
+      // DIFF SYNC LAYER
+      if (canvasId && shadowCopy?.contentHash === currentHash && !force) {
+        console.log(`[SYNC SKIP] Announcement "${ann.title}" matches remote state.`);
         continue;
       }
 
       if (canvasId) {
-        console.log(`[ANN UPDATE] Updating ${ann.title} (Canvas ID: ${canvasId})`);
+        console.log(`[SYNC UPDATE] Syncing Announcement "${ann.title}" (${canvasId})`);
         await canvasRequest(`courses/${ann.courseId}/discussion_topics/${canvasId}`, 'PUT', {
           title: ann.title, 
           message: ann.content
         }, token);
       } else {
-        console.log(`[ANN CREATE] Posting ${ann.title}`);
+        console.log(`[SYNC CREATE] Posting Announcement "${ann.title}"`);
         const res = await canvasRequest(`courses/${ann.courseId}/discussion_topics`, 'POST', {
           title: ann.title, 
           message: ann.content, 
@@ -507,16 +686,16 @@ export const deployAnnouncements = onCall({ secrets: [canvasApiToken] }, async (
         canvasId = res.id.toString();
       }
       
-      await annRef.update({ 
-        status: 'Posted',
+      await annRef.set({ 
         canvasId,
         contentHash: currentHash,
-        updatedAt: admin.firestore.FieldValue.serverTimestamp()
-      });
+        status: 'Posted',
+        lastSyncedAt: admin.firestore.FieldValue.serverTimestamp()
+      }, { merge: true });
 
-      await lockRef.update({ expiresAt: new Date(Date.now() + 2 * 60 * 1000) });
+      await lockRef.delete();
     } catch (error: any) {
-      console.error(`Announcement deploy fail: ${error.message}`);
+      console.error(`Announcement Sync Failure: ${error.message}`);
     }
   }
   return { success: true };

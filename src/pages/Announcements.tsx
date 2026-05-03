@@ -20,6 +20,7 @@ import { useLocation } from 'react-router-dom'
 import { useThalesStore } from '../store'
 import { CommandBar } from '../components/announcements/CommandBar'
 import { PreviewCard } from '../components/announcements/PreviewCard'
+import { useJob } from '../hooks/useJob'
 
 const SMART_CHIPS = ['Math Test', 'Reading Test', 'Spelling List', 'Grammar Quiz', 'Weekly Update'];
 
@@ -68,8 +69,28 @@ export function Announcements() {
   const [allHistory, setAllHistory] = useState<Announcement[]>([]);
 
   const { announcements, isLoading, save, isSaving } = useAnnouncements(week);
-  const { draft, isDrafting } = useDraftAnnouncement();
+  const { draft, isDrafting: hookDrafting } = useDraftAnnouncement();
   const pendingNewsletterDraft = useThalesStore((state) => state.pendingNewsletterDraft);
+  const { activeJobId, setActiveJob } = useThalesStore();
+  const { job } = useJob(activeJobId);
+
+  useEffect(() => {
+    if (job?.status === 'completed' && job.result) {
+      if (job.result.bodyHTML) {
+        setLocalContent(job.result.bodyHTML);
+        setLocalSubject(job.result.title || '');
+      }
+      setActiveJob(null);
+      toast.success("Intelligence Logic Applied: Draft Ready");
+      setCommand('');
+    } else if (job?.status === 'failed') {
+      toast.error(`Neural Engine Error: ${job.error}`);
+      setActiveJob(null);
+    }
+  }, [job?.status, setActiveJob]);
+
+  // isDrafting is true if either the hook is starting the job OR the job is processing
+  const isDrafting = hookDrafting || (job?.status === 'pending' || job?.status === 'processing');
 
   useEffect(() => {
     if (pendingNewsletterDraft && pendingNewsletterDraft.weekId === week && !localContent) {
@@ -116,17 +137,7 @@ export function Announcements() {
     if (!settings) return;
     const finalCmd = cmd || command;
     setLastCommand(finalCmd);
-    const result = await draft(week, settings, finalCmd);
-    if (result) {
-      if (typeof result === 'object' && result.emailBody) {
-        setLocalContent(result.emailBody);
-        setLocalSubject(result.subject || '');
-      } else {
-        setLocalContent(result);
-      }
-      toast.success(finalCmd ? 'Intelligence Logic Applied' : 'Weekly Briefing Drafted');
-      setCommand('');
-    }
+    await draft(week, settings, finalCmd);
   };
 
   const handleCopy = () => {
