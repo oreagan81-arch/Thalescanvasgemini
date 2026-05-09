@@ -32,8 +32,15 @@ export async function trackMetrics(data: {
   }
 }
 
+
+export function trackAssignmentGeneration(count: number) {
+  return {
+    assignmentsGenerated: count,
+    aiCallsSaved: count * 2 // no per-assignment AI calls
+  };
+}
+
 export async function getAggregatedMetrics() {
-    const snapshot = await db.collection("metrics").limit(7).get();
     let totalTokens = 0;
     let totalRequests = 0;
     let totalHits = 0;

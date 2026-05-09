@@ -4,8 +4,16 @@ import { extractMathTestNumber, parseMathTest, resolveELAResource } from "../lib
 import { resourceService } from "./service.resource";
 import { auth } from "../lib/firebase";
 
+export interface Lesson {
+  description: string;
+  subject: string;
+  lessonNum: string;
+  type: string;
+  spellingTestNum?: string;
+}
+
 export interface DayPlan {
-  lessons: string[];
+  lessons: Lesson[];
   assignments: string[];
   resources: string[];
 }
@@ -77,7 +85,20 @@ THALES SPECIFIC RULES:
   const daySchema = {
     type: Type.OBJECT,
     properties: {
-      lessons: { type: Type.ARRAY, items: { type: Type.STRING } },
+      lessons: { 
+        type: Type.ARRAY, 
+        items: { 
+          type: Type.OBJECT,
+          properties: {
+            description: { type: Type.STRING },
+            subject: { type: Type.STRING },
+            lessonNum: { type: Type.STRING },
+            type: { type: Type.STRING },
+            spellingTestNum: { type: Type.STRING }
+          },
+          required: ["description", "subject", "lessonNum", "type"]
+        }
+      },
       assignments: { type: Type.ARRAY, items: { type: Type.STRING } },
       resources: { type: Type.ARRAY, items: { type: Type.STRING } }
     },
@@ -131,32 +152,36 @@ THALES SPECIFIC RULES:
       
       // 1. Post-process lessons
       dayData.lessons = dayData.lessons.map(lesson => {
-        const trimmed = lesson.trim();
-        const mapped = mapDict[trimmed.toLowerCase()];
-        if (mapped) return mapped;
+        const description = lesson.description.trim();
+        const mapped = mapDict[description.toLowerCase()];
+        
+        let finalDescription = mapped || description;
 
         // Check Math
-        const testNum = extractMathTestNumber(trimmed);
+        const testNum = extractMathTestNumber(finalDescription);
         if (testNum !== null) {
           const details = parseMathTest(testNum);
-          return `[MATH TEST ${testNum}] ${details.factSkill} (${details.powerUp})`;
+          finalDescription = `[MATH TEST ${testNum}] ${details.factSkill} (${details.powerUp})`;
+        } else {
+          // Check ELA (Decimals or CP)
+          const ela = resolveELAResource(finalDescription);
+          if (ela) finalDescription = ela.title;
         }
-        
-        // Check ELA (Decimals or CP)
-        const ela = resolveELAResource(trimmed);
-        if (ela) return ela.title;
 
-        return lesson;
+        return {
+          ...lesson,
+          description: finalDescription
+        };
       });
 
       // 2. Post-process assignments
       const newAssignments: string[] = [...dayData.assignments];
       
       // Look for CP in lessons/resources to auto-generate assignments if missing
-      dayData.lessons.concat(dayData.resources).forEach(item => {
-        const trimmed = item.trim();
-        const mapped = mapDict[trimmed.toLowerCase()];
-        const lookup = mapped || trimmed;
+      dayData.lessons.concat(dayData.resources.map(r => ({ description: r } as any))).forEach(item => {
+        const description = item.description.trim();
+        const mapped = mapDict[description.toLowerCase()];
+        const lookup = mapped || description;
 
         const ela = resolveELAResource(lookup);
         if (ela && ela.isAssignment) {

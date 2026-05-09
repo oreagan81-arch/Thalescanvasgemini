@@ -13,10 +13,13 @@ import {
   getEnrichmentPrompt,
   PROMPT_VERSION
 } from './prompts';
+import fetch from "node-fetch";
 import { rulesEngine } from './rulesEngine';
 import { jobService, JobStatus, Job } from './jobService';
-import { AiPipeline } from './core/pipeline';
+import { AiPipeline, runPipeline } from './core/pipeline';
 import { canvasApiToken, canvasRequest } from './core/canvas';
+import { validateAssignment } from './core/assignmentValidator';
+import { shouldCreateAssignment } from './core/assignmentEngine';
 import { diffEngine } from './canvas/diffEngine';
 
 import { getSystemConfig as getSystemConfigService, updateSystemConfig as updateSystemConfigService } from './control/config';
@@ -84,21 +87,9 @@ export const startAiPlanGeneration = onCall(async (request: CallableRequest<any>
       await updateJob(jobId, { progress: 60 });
       let finalPlan = await pipeline.buildWeekStructure(structuralPlan);
       
-      // STAGE 3: DAY PROCESSING (VALIDATION/ENRICHMENT)
-      await updateJob(jobId, { status: "running", progress: 80 });
-      const courseInfo = `${finalPlan.course}, Quarter ${finalPlan.quarter}, Week ${finalPlan.weekId}`;
-      
-      const jobSnapshot = await db.collection('jobs').doc(jobId).get();
-      const jobData = jobSnapshot.data() as Job;
-      const isRetry = (jobData.attempts || 1) > 1;
-      
-      for (let i = 0; i < finalPlan.days.length; i++) {
-        let day = finalPlan.days[i];
-        
-        await pipeline.processDay(day, courseInfo, config.promptVersion, getEnrichmentPrompt, ENRICHMENT_SCHEMA as any, jobId, {
-            updateStep: async (jid: string, step: string, status: string) => await logJob(jid, `Step ${step}: ${status}`)
-        }, false, isRetry);
-      }
+      // Use the new functional runPipeline to handle Day Processing + Deployment
+      const weeks = [{ days: finalPlan.days }]; // Adjust structure if needed
+      await runPipeline(weeks, jobId, db, pipeline);
 
       await updateJob(jobId, {
         status: "completed",
@@ -293,7 +284,18 @@ export const deployAssignments = onCall({ secrets: [canvasApiToken] }, async (re
 
   const results = [];
   for (const assign of assignments) {
-    if (!assign.id || !assign.courseId) continue;
+    try {
+        validateAssignment(assign);
+    } catch (err) {
+        console.error("❌ Assignment validation failed:", assign);
+        continue;
+    }
+    
+    console.log("🚀 Assignment Payload:", JSON.stringify(assign, null, 2))
+    if (!assign.docId || !assign.courseId) continue;
+
+    const ok = await shouldCreateAssignment(db, assign);
+    if (!ok) continue;
 
     const lockKey = generateHash(`deploy_assign_${assign.id}`);
     const lockRef = db.collection('locks').doc(lockKey);
@@ -390,6 +392,150 @@ export const auditCurriculum = onCall(async (request: CallableRequest<any>) => {
   });
 
   return { success: true, results };
+});
+
+const CANVAS_BASE = "https://thalesacademy.instructure.com";
+
+// Helper to strip HTML
+const stripHtml = (html: string) => html.replace(/<[^>]*>?/gm, "").trim();
+
+// Helper to extract text between an element and the next heading
+const extractSectionText = (html: string, sectionHeadingRegex: RegExp): string | null => {
+  const match = html.match(sectionHeadingRegex);
+  if (!match) return null;
+  const startIdx = match.index! + match[0].length;
+  const sub = html.substring(startIdx);
+  const nextHeadingIdx = sub.search(/<h[1-6]/i);
+  return nextHeadingIdx !== -1 ? stripHtml(sub.substring(0, nextHeadingIdx)) : stripHtml(sub);
+};
+
+export const canvasAudit = onCall(async (request: CallableRequest<any>) => {
+  const { weekSlug, courseIds, weekStartDate } = request.data;
+  
+  // Requires Canvas Token stored in Firebase Envs/Secrets
+  const CANVAS_TOKEN = process.env.CANVAS_API_TOKEN;
+  
+  if (!CANVAS_TOKEN) {
+    throw new HttpsError("internal", "Canvas API token not configured.");
+  }
+  
+  if (!weekSlug || !courseIds || !Array.isArray(courseIds)) {
+    throw new HttpsError("invalid-argument", "Missing required parameters.");
+  }
+
+  const start = new Date(weekStartDate);
+  const end = new Date(start);
+  end.setDate(end.getDate() + 7);
+
+  const fetchCanvas = async (path: string) => {
+    const res = await fetch(`${CANVAS_BASE}/api/v1/${path}`, {
+      headers: { Authorization: `Bearer ${CANVAS_TOKEN}` },
+    });
+    if (!res.ok) throw new Error(`Canvas API error: ${res.statusText}`);
+    return res.json();
+  };
+
+  const auditResult: any = {
+    generated_at: new Date().toISOString(),
+    week_slug: weekSlug,
+    week_start_date: weekStartDate,
+    courses: {},
+  };
+
+  const days = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"];
+
+  await Promise.all(
+    courseIds.map(async (courseId) => {
+      const courseAudit: any = {
+        course_id: courseId,
+        fetch_errors: [],
+      };
+
+      try {
+        // A) COURSE INFO
+        const courseData = await fetchCanvas(`courses/${courseId}`);
+        courseAudit.course_info = {
+          name: courseData.name,
+          course_code: courseData.course_code,
+          workflow_state: courseData.workflow_state,
+        };
+
+        // B) PAGE DATA
+        try {
+          const pageData = await fetchCanvas(`courses/${courseId}/pages/${weekSlug}`);
+          const body = pageData.body || "";
+          const bodyText = stripHtml(body);
+          
+          const atHomeMatches = body.match(/<h4[^>]*>.*?At Home.*?<\/h4>/gi) || [];
+          const inClassMatches = body.match(/<h4[^>]*>.*?In Class.*?<\/h4>/gi) || [];
+          const assignmentLinks = body.match(/\/courses\/\d+\/assignments\/\d+/g) || [];
+          
+          const day_blocks_found = days.filter(d => new RegExp(`\\b${d}\\b`, 'i').test(bodyText));
+          const missing_days = days.filter(d => !day_blocks_found.includes(d));
+
+          let prefix = "none";
+          if (bodyText.includes("SM5:")) prefix = "SM5:";
+          else if (bodyText.includes("RM4:")) prefix = "RM4:";
+          else if (bodyText.includes("ELA4:")) prefix = "ELA4:";
+
+          courseAudit.page = {
+            title: pageData.title,
+            url: pageData.html_url,
+            published: pageData.published,
+            updated_at: pageData.updated_at,
+            body: body,
+            body_text: bodyText,
+            has_reminders_section: /<h2[^>]*>.*?Reminders.*?<\/h2>/i.test(body),
+            has_resources_section: /<h2[^>]*>.*?Resources.*?<\/h2>/i.test(body),
+            has_at_home_sections: atHomeMatches.length,
+            has_in_class_sections: inClassMatches.length,
+            day_blocks_found,
+            missing_days,
+            resource_links: (body.match(/href="([^"]+)"/g) || []).map((l: string) => l.slice(6, -1)),
+            reminder_text: extractSectionText(body, /<h2[^>]*>.*?Reminders.*?<\/h2>/i) || "",
+            assignment_links_found: Array.from(new Set(assignmentLinks)),
+            prefix_found: prefix,
+            word_count: bodyText.split(/\s+/).length,
+          };
+        } catch (e: any) {
+          courseAudit.page = null;
+          courseAudit.fetch_errors.push(`Page Fetch Error: ${e.message}`);
+        }
+
+        // C) ASSIGNMENTS & GROUPS
+        try {
+          const [assignmentsList, groupsList] = await Promise.all([
+            fetchCanvas(`courses/${courseId}/assignments?per_page=100`),
+            fetchCanvas(`courses/${courseId}/assignment_groups`)
+          ]);
+
+          // Filter assignments by the week's dates
+          courseAudit.assignments = assignmentsList.filter((a: any) => {
+            if (!a.due_at) return false;
+            const due = new Date(a.due_at);
+            return due >= start && due < end;
+          });
+
+          courseAudit.assignment_groups = groupsList.map((g: any) => ({
+            id: g.id,
+            name: g.name,
+            group_weight: g.group_weight
+          }));
+        } catch (e: any) {
+          courseAudit.assignments = [];
+          courseAudit.assignment_groups = [];
+          courseAudit.fetch_errors.push(`Assignments Fetch Error: ${e.message}`);
+        }
+
+      } catch (e: any) {
+        courseAudit.fetch_errors.push(`Course Fetch Error: ${e.message}`);
+      }
+
+      auditResult.courses[courseAudit.course_info?.name || `Course-${courseId}`] = courseAudit;
+    })
+  );
+
+  return auditResult;
 });
 
 /**
@@ -511,9 +657,36 @@ export const runWeekValidator = onCall(async (request: CallableRequest<any>) => 
   return { valid: errors.length === 0, errors };
 });
 
-export const generateNewsletter = onCall(async (request: CallableRequest<any>) => {
-    if (!request.auth) throw new HttpsError("unauthenticated", "Auth required.");
-    return { success: true, message: "Newsletter stub updated with auth check." };
+import { resolveGradeInquiry, getStudentGrades, filterGrades } from './canvas/gradeReviewer';
+
+export const studentGradeReview = onCall({ secrets: [canvasApiToken] }, async (request: CallableRequest<any>) => {
+  if (!request.auth) throw new HttpsError("unauthenticated", "Auth required.");
+  const token = canvasApiToken.value();
+  const { courseId, mode, query } = request.data;
+
+  if (!courseId) throw new HttpsError("invalid-argument", "courseId is required.");
+
+  let inquiry: any = {
+    studentName: null,
+    metric: "summary",
+    category: "all",
+    period: "YTD",
+    subject: "all"
+  };
+
+  if (mode === 'query' && query) {
+    inquiry = await resolveGradeInquiry(query);
+  }
+
+  const data = await getStudentGrades(courseId, token);
+  const results = filterGrades(data, inquiry);
+
+  if (mode === 'alerts') {
+    const alerts = results.filter(r => r.lowGrades >= 2);
+    return { success: true, alerts, inquiry };
+  }
+
+  return { success: true, results, inquiry };
 });
 
 

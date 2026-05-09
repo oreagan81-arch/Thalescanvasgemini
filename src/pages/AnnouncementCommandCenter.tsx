@@ -174,45 +174,45 @@ export default function AnnouncementCommandCenter() {
         </Button>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 h-full">
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 h-full">
         {/* Left Column: The Command Input */}
-        <div className="lg:col-span-5 flex flex-col space-y-4">
-          <Card className="border-zinc-200 dark:border-zinc-800 shadow-sm flex-grow flex flex-col">
-            <CardHeader>
+        <div className="lg:col-span-4 flex flex-col space-y-4">
+          <Card className="border-zinc-200 dark:border-zinc-800 shadow-sm flex-grow flex flex-col bg-white/50 dark:bg-zinc-900/50 backdrop-blur-sm">
+            <CardHeader className="py-4">
               {showApiKeyError && (
-                <div className="mb-4 p-4 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 rounded-lg flex items-start gap-3 text-amber-800 dark:text-amber-400">
-                  <AlertCircle className="w-5 h-5 mt-0.5 flex-shrink-0" />
+                <div className="mb-4 p-3 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 rounded-lg flex items-start gap-3 text-amber-800 dark:text-amber-400">
+                  <AlertCircle className="w-4 h-4 mt-0.5 flex-shrink-0" />
                   <div>
-                    <p className="font-bold text-sm">Missing Gemini API Key</p>
-                    <p className="text-xs mt-1">
-                      To use AI features, please add your <code className="bg-amber-100 dark:bg-amber-900 px-1 py-0.5 rounded">GEMINI_API_KEY</code> 
-                      in the Settings page.
+                    <p className="font-bold text-xs uppercase tracking-tight">Missing Gemini API Key</p>
+                    <p className="text-[10px] mt-0.5 opacity-80">
+                      Add <code className="bg-amber-100 dark:bg-amber-900 px-1 py-0.5 rounded">GEMINI_API_KEY</code> 
+                      in Settings.
                     </p>
                   </div>
                 </div>
               )}
-              <CardTitle className="text-lg flex items-center gap-2">
-                <Wand2 className="w-5 h-5 text-purple-500" />
+              <CardTitle className="text-base flex items-center gap-2">
+                <Wand2 className="w-4 h-4 text-purple-500" />
                 Prompt Generator
               </CardTitle>
-              <CardDescription>
-                Use natural language. e.g., "Math Test 18 on Friday"
+              <CardDescription className="text-xs">
+                Natural language commands
               </CardDescription>
             </CardHeader>
-            <CardContent className="flex-grow flex flex-col gap-4">
+            <CardContent className="flex-grow flex flex-col gap-3 py-0">
               <Textarea 
                 placeholder="What do we need to announce to parents?" 
-                className="flex-grow min-h-[200px] text-base resize-none focus-visible:ring-blue-500"
+                className="flex-grow min-h-[150px] text-sm resize-none focus-visible:ring-blue-500 bg-white/50 dark:bg-black/20"
                 value={command}
                 onChange={(e) => setCommand(e.target.value)}
               />
               
-              <div className="flex flex-wrap gap-2">
+              <div className="flex flex-wrap gap-1.5 pb-4">
                 {SUGGESTIONS.map((suggestion) => (
                   <Badge 
                     key={suggestion} 
                     variant="secondary" 
-                    className="cursor-pointer hover:bg-zinc-200 dark:hover:bg-zinc-700 px-3 py-1 text-sm font-normal"
+                    className="cursor-pointer hover:bg-zinc-200 dark:hover:bg-zinc-700 px-2 py-0.5 text-[10px] font-medium transition-colors"
                     onClick={() => setCommand(suggestion)}
                   >
                     {suggestion}
@@ -220,30 +220,27 @@ export default function AnnouncementCommandCenter() {
                 ))}
               </div>
             </CardContent>
-            <CardFooter>
+            <CardFooter className="pt-2 pb-4">
               <Button 
-                className="w-full gap-2 bg-blue-600 hover:bg-blue-700 text-white" 
-                size="lg"
+                className="w-full gap-2 bg-blue-600 hover:bg-blue-700 text-white shadow-lg shadow-blue-500/20" 
+                size="sm"
                 onClick={handleGenerate}
                 disabled={isGenerating || !command.trim()}
               >
                 {isGenerating ? (
-                  <span className="flex items-center gap-2">
-                    <Sparkles className="w-5 h-5 animate-spin" /> Analyzing Curriculum...
-                  </span>
+                   <Loader2 className="w-4 h-4 animate-spin" />
                 ) : (
-                  <span className="flex items-center gap-2">
-                    <Send className="w-5 h-5" /> Generate Announcement
-                  </span>
+                   <Send className="w-4 h-4" />
                 )}
+                {isGenerating ? 'Analyzing...' : 'Generate Announcement'}
               </Button>
             </CardFooter>
           </Card>
         </div>
 
         {/* Right Column: Review & Schedule UI */}
-        <div className="lg:col-span-7 flex flex-col">
-          <Card className="border-zinc-200 dark:border-zinc-800 shadow-sm flex-grow flex flex-col">
+        <div className="lg:col-span-8 flex flex-col">
+          <Card className="border-zinc-200 dark:border-zinc-800 shadow-sm flex-grow flex flex-col overflow-hidden">
             {!result && !isGenerating && (
               <div className="flex flex-col items-center justify-center h-full text-zinc-400 p-12 text-center">
                 <Sparkles className="w-12 h-12 mb-4 opacity-20" />

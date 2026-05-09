@@ -11,13 +11,17 @@ import {
   Zap,
   Filter,
   RefreshCw,
-  Search
+  Search,
+  Play
 } from 'lucide-react';
 import { collection, query, where, orderBy, limit, getDocs, onSnapshot } from 'firebase/firestore';
 import { db, auth } from '../lib/firebase';
 import { motion } from 'motion/react';
 import { cn } from '@/lib/utils';
 import { format } from 'date-fns';
+import { handleFirestoreError, OperationType } from '../lib/firestoreErrorHandler';
+import { runAssignmentDiagnostics } from '../debug/runDiagnostics';
+import { AssignmentPayload } from '../debug/validateAssignmentPayload';
 
 interface JobRecord {
   id: string;
@@ -53,6 +57,8 @@ export default function Diagnostics() {
       })) as JobRecord[];
       setJobs(records);
       setLoading(false);
+    }, (error) => {
+      handleFirestoreError(error, OperationType.LIST, 'jobs');
     });
 
     return () => unsubscribe();
@@ -75,14 +81,33 @@ export default function Diagnostics() {
     <div className="space-y-8 pb-12">
       {/* Header */}
       <div className="flex flex-col gap-2">
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-indigo-500/10 flex items-center justify-center border border-indigo-500/20 shadow-lg shadow-indigo-500/5">
-            <Activity className="w-5 h-5 text-indigo-400" />
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-indigo-500/10 flex items-center justify-center border border-indigo-500/20 shadow-lg shadow-indigo-500/5">
+              <Activity className="w-5 h-5 text-indigo-400" />
+            </div>
+            <div>
+              <h1 className="text-2xl font-bold text-white tracking-tight">System Diagnostics</h1>
+              <p className="text-sm text-slate-500">Monitor AI synthesis performance and API integrity.</p>
+            </div>
           </div>
-          <div>
-            <h1 className="text-2xl font-bold text-white tracking-tight">System Diagnostics</h1>
-            <p className="text-sm text-slate-500">Monitor AI synthesis performance and API integrity.</p>
-          </div>
+          
+          <button 
+            onClick={async () => {
+              const testPayload: AssignmentPayload = {
+                title: "RM4: Reading Test 8",
+                group: "Reading Assessments",
+                idempotencyKey: `Reading-8-test-${Date.now()}`,
+                due_at: "2026-05-10T23:59:00Z",
+                subject: "Reading"
+              };
+              await runAssignmentDiagnostics([testPayload]);
+            }}
+            className="flex items-center gap-2 px-4 py-2 bg-indigo-500 hover:bg-indigo-600 text-white text-xs font-bold uppercase tracking-wider rounded-lg transition-all shadow-lg shadow-indigo-500/20"
+          >
+            <Play className="w-3 h-3" />
+            Run Test
+          </button>
         </div>
       </div>
 

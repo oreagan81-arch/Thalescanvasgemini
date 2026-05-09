@@ -6,9 +6,11 @@ import { SystemConfig } from './types';
 
 interface UISlice {
   sidebarOpen: boolean;
+  brainOpen: boolean;
   theme: 'light' | 'dark' | 'zinc';
   heartbeatLogs: string[];
   toggleSidebar: () => void;
+  toggleBrain: () => void;
   setTheme: (theme: 'light' | 'dark' | 'zinc') => void;
   addLog: (msg: string) => void;
   clearLogs: () => void;
@@ -96,9 +98,11 @@ const createBrainSlice: StateCreator<ThalesState, [], [], BrainSlice> = (set) =>
 
 const createUISlice: StateCreator<ThalesState, [], [], UISlice> = (set) => ({
   sidebarOpen: true,
+  brainOpen: false,
   theme: 'dark',
   heartbeatLogs: ["[SYSTEM] Thales OS v4.0 initialized.", "[HEARTBEAT] Determinism Engine Stable."],
   toggleSidebar: () => set((state) => ({ sidebarOpen: !state.sidebarOpen })),
+  toggleBrain: () => set((state) => ({ brainOpen: !state.brainOpen })),
   setTheme: (theme) => set({ theme }),
   addLog: (msg) => set((state) => ({ 
     heartbeatLogs: [...state.heartbeatLogs.slice(-20), `[${new Date().toLocaleTimeString()}] ${msg}`] 

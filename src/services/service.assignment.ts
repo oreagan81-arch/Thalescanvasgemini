@@ -188,7 +188,12 @@ export const assignmentService = {
             dueDate = baseDate;
           }
           
-          const newRef = doc(collection(db, COLLECTION_NAME));
+          // Use deterministic idempotency key based on row info and title
+          // Must match ^[a-zA-Z0-9_\\-]+$ and be <= 128 chars
+          const rawKey = `${weekId}_${rowId}_${gen.title}`.replace(/[^a-zA-Z0-9_-]/g, '_');
+          const idempotencyKey = rawKey.substring(0, 128);
+
+          const newRef = doc(db, COLLECTION_NAME, idempotencyKey);
           batch.set(newRef, {
             userId,
             weekId,
@@ -200,6 +205,7 @@ export const assignmentService = {
             points: gen.points,
             gradingType: gen.gradingType,
             omitFromFinalGrade: gen.omitFromFinalGrade,
+            idempotencyKey,
             dueDate,
             status: 'Pending',
             createdAt: serverTimestamp(),

@@ -1,4 +1,4 @@
-import { Outlet, NavLink } from 'react-router-dom';
+import { Outlet, NavLink, useLocation } from 'react-router-dom';
 import { 
   LayoutDashboard, 
   Calendar, 
@@ -19,8 +19,13 @@ import {
   AppWindow,
   Activity,
   Sparkles,
-  Wand2
+  Wand2,
+  ClipboardCheck,
+  GraduationCap,
+  Cpu,
+  X
 } from 'lucide-react';
+import { motion, AnimatePresence } from 'motion/react';
 import { useStore } from '../store';
 import { useAuth } from '../contexts/AuthContext';
 import { Button } from '@/components/ui/button';
@@ -32,7 +37,10 @@ import { CommandCenterBrain } from '../components/CommandCenterBrain';
 
 export function DashboardLayout() {
   const { logOut } = useAuth();
+  const location = useLocation();
   const sidebarOpen = useStore((state) => state.sidebarOpen);
+  const brainOpen = useStore((state) => state.brainOpen);
+  const toggleBrain = useStore((state) => state.toggleBrain);
   const heartbeatLogs = useStore((state) => state.heartbeatLogs);
   const activeJobId = useStore((state) => state.activeJobId);
   const setActiveJob = useStore((state) => state.setActiveJob);
@@ -59,16 +67,46 @@ export function DashboardLayout() {
     { icon: Sparkles, label: 'AI Command Center', to: '/command-center' },
     { icon: Layout, label: 'Blueprints', to: '/templates' },
     { icon: Layers, label: 'Resource Brain', to: '/resources' },
+    { icon: ClipboardCheck, label: 'Canvas Auditor', to: '/canvas-auditor' },
+    { icon: GraduationCap, label: 'Grade Reviewer', to: '/grade-reviewer' },
     { icon: Activity, label: 'Diagnostics', to: '/diagnostics' },
     { icon: Settings, label: 'Settings', to: '/settings' },
   ];
 
   return (
     <div className="flex h-screen bg-[#0a0a0c] text-slate-100 overflow-hidden font-sans">
-      <CommandCenterBrain 
-        jobId={activeJobId} 
-        onReset={() => setActiveJob(null)}
-      />
+      <AnimatePresence>
+        {brainOpen && (
+          <motion.div
+            initial={{ x: -400 }}
+            animate={{ x: 0 }}
+            exit={{ x: -400 }}
+            transition={{ type: "spring", damping: 25, stiffness: 200 }}
+            className="fixed inset-y-0 left-0 w-[400px] z-50 bg-stone-50 border-r border-stone-800 shadow-2xl overflow-y-auto"
+          >
+            <div className="sticky top-0 right-0 p-4 flex justify-end bg-stone-50 z-10">
+              <Button variant="ghost" size="icon" onClick={toggleBrain} className="text-stone-500 hover:text-stone-900">
+                <X className="w-5 h-5" />
+              </Button>
+            </div>
+            <CommandCenterBrain 
+              jobId={activeJobId} 
+              onReset={() => setActiveJob(null)}
+            />
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {brainOpen && (
+        <motion.div 
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          onClick={toggleBrain}
+          className="fixed inset-0 bg-black/40 backdrop-blur-sm z-40 lg:hidden"
+        />
+      )}
+
       {/* Sidebar - Linear/Superhuman inspired minimal rail */}
       <nav className="w-16 lg:w-64 flex flex-col border-r border-white/10 bg-[#0d0d10] z-20 transition-all duration-300">
         <div className="h-16 flex items-center justify-center lg:justify-start px-4 lg:px-6 border-b border-white/10 shrink-0">
@@ -143,8 +181,8 @@ export function DashboardLayout() {
                       <div className="hidden lg:block max-h-64 overflow-y-auto px-1 space-y-1 disable-scrollbars">
                          {repos.map(repo => (
                             <div 
-                              key={repo.id} 
-                              className="group flex flex-col p-2 rounded-lg hover:bg-white/5 transition-colors cursor-default"
+                               key={repo.id} 
+                               className="group flex flex-col p-2 rounded-lg hover:bg-white/5 transition-colors cursor-default"
                             >
                                <div className="flex items-center justify-between">
                                   <div className="flex items-center min-w-0">
@@ -219,6 +257,32 @@ export function DashboardLayout() {
 
       {/* Main Content */}
       <main className="flex-1 flex flex-col min-w-0 bg-[#0a0a0c] relative z-10 box-border">
+        {/* Top bar for utilities and space optimization */}
+        <header className="h-14 border-b border-white/10 flex items-center justify-between px-4 lg:px-8 bg-[#0d0d10]/50 backdrop-blur-md sticky top-0 z-20">
+          <div className="flex items-center gap-4">
+             <div className="lg:hidden h-8 w-8 bg-amber-500 rounded flex items-center justify-center font-bold text-black">
+               <span className="text-sm font-bold text-black">T</span>
+             </div>
+             <h2 className="text-sm font-medium text-slate-300 hidden sm:block">
+               {navItems.find(item => location.pathname === item.to)?.label || 'System Control'}
+             </h2>
+          </div>
+          <div className="flex items-center gap-2">
+            <Button 
+              variant="outline" 
+              size="sm" 
+              onClick={toggleBrain}
+              className={cn(
+                "h-8 border-white/10 bg-white/5 text-[10px] font-bold uppercase tracking-widest gap-2 transition-all",
+                brainOpen ? "text-amber-500 border-amber-500/50" : "text-slate-400 hover:text-white"
+              )}
+            >
+              <Cpu className="w-3.5 h-3.5" />
+              Intelligence Engine
+            </Button>
+          </div>
+        </header>
+
         <div className="flex-1 overflow-auto p-4 lg:p-8">
           <div className="max-w-7xl mx-auto w-full">
             <Outlet />

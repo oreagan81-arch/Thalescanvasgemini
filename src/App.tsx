@@ -27,6 +27,8 @@ import { Resources } from './pages/Resources';
 import { Settings } from './pages/Settings';
 import Diagnostics from './pages/Diagnostics';
 import { Templates } from './pages/Templates';
+import CanvasAuditorPage from './pages/CanvasAuditorPage';
+import StudentGradeReviewer from './pages/StudentGradeReviewer';
 import { SyllabusMapper } from './components/planner/SyllabusMapper';
 import AnnouncementCommandCenter from './pages/AnnouncementCommandCenter';
 import { useStore } from './store';
@@ -151,6 +153,8 @@ export default function App() {
                   <Route path="diagnostics" element={<Diagnostics />} />
                   <Route path="settings" element={<Settings />} />
                   <Route path="templates" element={<Templates />} />
+                  <Route path="canvas-auditor" element={<CanvasAuditorPage />} />
+                  <Route path="grade-reviewer" element={<StudentGradeReviewer />} />
                 </Route>
               </Routes>
             </BrowserRouter>

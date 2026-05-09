@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { db } from '../lib/firebase';
 import { doc, onSnapshot } from 'firebase/firestore';
+import { handleFirestoreError, OperationType } from '../lib/firestoreErrorHandler';
 
 export interface JobState {
   id: string;
@@ -32,9 +33,8 @@ export function useJob(jobId: string | null) {
         setJob(snap.data() as JobState);
       }
       setLoading(false);
-    }, (err) => {
-      console.error("Job subscription error:", err);
-      setLoading(false);
+    }, (error) => {
+      handleFirestoreError(error, OperationType.GET, `jobs/${jobId}`);
     });
 
     return () => unsubscribe();

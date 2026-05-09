@@ -30,8 +30,14 @@ export interface FirestoreErrorInfo {
  * Standardized Firestore error handler for AI Studio diagnostic integration.
  */
 export function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null) {
+  const errorMessage = error instanceof Error ? error.message : String(error);
+
+  if (errorMessage.includes("expected pattern")) {
+    console.error("🔥 Pattern Error Full Object:", JSON.stringify(error, null, 2));
+  }
+
   const errInfo: FirestoreErrorInfo = {
-    error: error instanceof Error ? error.message : String(error),
+    error: errorMessage,
     authInfo: {
       userId: auth.currentUser?.uid,
       email: auth.currentUser?.email,
